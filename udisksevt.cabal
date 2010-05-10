@@ -1,0 +1,17 @@
+Name: udisksevt
+Version: 0.1
+Cabal-Version: >=1.2
+Build-Type: Simple
+License: GPL
+License-File: LICENSE
+Author: DPX-Infinity
+Homepage: http://dpx-infinity.vfose.ru/
+Synopsis: UDisks helper program - events monitor
+
+Executable udisksevt
+    Hs-Source-Dirs: ., ./UDisksEvt
+    Build-Depends: dbus-client>=0.3, dbus-core>=0.8, parsec>=2.1, base>=4.2
+    Main-Is: Main.hs
+    Other-Modules: UDisks 
+-- ,config
+    Extensions: OverloadedStrings

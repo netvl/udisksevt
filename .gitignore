@@ -1,0 +1,9 @@
+*.o
+*.hi
+*.swp
+*~
+*.conf
+*.log
+udisksevt
+dist/
+
