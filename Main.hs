@@ -4,7 +4,7 @@
 
 module Main where
 
---import UDisksEvt.Config
+import UDisksEvt.Config
 import UDisksEvt.UDisks
 
 main :: IO ()
