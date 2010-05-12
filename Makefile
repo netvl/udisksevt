@@ -8,8 +8,8 @@ FILES=$(shell find -type f -iname '*.hs')
 OUTDIR=out
 # Name of ipupdd binary
 BINNAME=$(OUTDIR)/udisksevt
-# GHC extensions used in project - as flags
-GHCEXTS=
+# Additional GHC flags
+GHCFLAGS=-XTupleSection -XOverloadedStrings
 
 ## Rules
 
@@ -17,13 +17,20 @@ GHCEXTS=
 all: udisksevt
 
 # Rule for updater project
+udisksevt-direct: $(FILES)
+	ghc $(GHCFLAGS) --make Main.hs -o $(BINNAME)
+
+configure:
+	runhaskell Setup.hs configure --user
+
 udisksevt: $(FILES)
-	ghc $(GHCEXTS) --make Main.hs -o $(BINNAME)
+	runhaskell Setup.hs build
 
 # Clean rule
 clean:
 	rm -f $(FILES:.hs=.o)
 	rm -f $(FILES:.hs=.hi)
+	rm -rf dist
 	rm -f *~
 
 # Clean rule for output directory

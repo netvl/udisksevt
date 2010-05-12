@@ -2,80 +2,52 @@
 -- Copyright (C) DPX-Infinity, 2010
 -- Configuration module
 
-module UDisksEvt.Config where
+module UDisksEvt.Config (
+    readConfiguration
+    ) where
 
 import Control.Monad.State
 import Text.Parsec hiding (spaces, State)
 import Text.Parsec.Combinator
 import Text.Parsec.String
 
--- Main configuration datatype
-data Configuration = C { cVars :: [ConfigVar]
-                       , cTriggers :: [ConfigTrigger]
-                       }
-                   deriving (Show)
+import UDisksEvt.Datatypes
 
--- Configuration variable datatype
-data ConfigVar = CVar { cvName :: String
-                      , cvValue :: ConfigVarValue
-                      }
-               deriving (Show)
-
--- Configuration variable value
-data ConfigVarValue = CVString String
-                    | CVBool Bool
-                    | CVInt Int
-                    deriving (Show)
-
--- Configuration trigger - an event on which some commands can be run
-data ConfigTrigger = CTrigger { ctName :: String
-                              , ctActions :: [ConfigTriggerAction]
-                              }
-                   deriving (Show)
-
--- Configuration trigger action - these commands definition
-data ConfigTriggerAction = CTAShellCommand { ctascCommand :: String
-                                           }
-                         | CTANotification { ctanBody :: String
-                                           , ctanSummary :: String
-                                           , ctanIcon :: String
-                                           , ctanTimeout :: Int	
-                                           , ctanUrgency :: NotificationUrgency
-                                           }
-                         deriving (Show)
-
--- Notification urgency parameter
-data NotificationUrgency = NULow                         
-                         | NUNormal
-                         | NUCritical
-                         deriving (Show)
-
--- Intermediate structure used in config parsing
-data ConfigLine = CLVar ConfigVar
-                | CLTrigger String
-                | CLTriggerAction ConfigTriggerAction
-                | CLEmpty
-                | CLComment
-                deriving (Show)
+readConfiguration :: FilePath -> IO (Maybe Configuration)
+readConfiguration fname = do
+    fdata <- readFile fname
+    case parse fileData fname fdata of
+        Left e -> do
+            hPutStrLn stderr $ "Error parsing config file " ++ fname ++ ": " ++ show e
+            return Nothing
+        Right c -> return (Just c)
 
 mPutLine :: ConfigLine -> State (Configuration, [ConfigLine]) () 
 mPutLine ln = do
     (conf, lst) <- get
     put (conf, ln:lst)
 
-mDropLine :: State (Configuration, [ConfigLine]) ()
-mDropLine = do
-    (conf, lst) <- get
-    if null lst
-        then return ()
-        else put (conf, tail lst)
-
 mChangeConfig :: (Configuration -> Configuration) -> State (Configuration, [ConfigLine]) ()
 mChangeConfig f = do
     (conf, lst) <- get
     put (f conf, lst)
 
-mergeVariables = undefined
+revertTriggers :: Configuration -> Configuration
+revertTriggers
+
+mergeVariables :: (Configuration, [ConfigLine]) -> (Configuration, [ConfigLine])
+mergeVariables (conf, lst) = execState (merger lst) (conf, [])
+    where
+        merger :: [ConfigLine] -> State (Configuration, [ConfigLine]) ()
+        merger [] = return ()
+        merger (x:xs) = do
+            case x of
+                CLVar cvar -> mChangeConfig (addVariable cvar)
+                _ -> mPutLine x
+            merger xs
+
+        addVariable :: ConfigVar -> Configuration -> Configuration
+        addVariable cvar c@(C { cVars = cvars }) = c { cVars = cvar:cvars }
 
 mergeTriggers :: (Configuration, [ConfigLine]) -> (Configuration, [ConfigLine])
 mergeTriggers (conf, lst) = execState (merger lst) (conf, [])
@@ -91,8 +63,10 @@ mergeTriggers (conf, lst) = execState (merger lst) (conf, [])
             
         insertTrigger :: ConfigTrigger -> Configuration -> Configuration
         insertTrigger ct c@(C { cTriggers = cts }) = c { cTriggers = ct:cts }
+
         modifyLastTrigger :: ConfigTriggerAction -> Configuration -> Configuration
-        modifyLastTrigger cta c@(C { cTriggers = ct@(CTrigger { ctActions = ctas }):cts }) = c { cTriggers = (ct { ctActions = cta:ctas } ):cts }
+        modifyLastTrigger cta c@(C { cTriggers = ct@(CTrigger { ctActions = ctas }):cts }) =
+            c { cTriggers = (ct { ctActions = cta:ctas } ):cts }
 
 cleanLines :: [ConfigLine] -> [ConfigLine]
 cleanLines = filter f
@@ -104,7 +78,8 @@ cleanLines = filter f
 -- Main parser - while as whole
 fileData :: Parser Configuration
 fileData = (fileLine <|> emptyLine <|> commentLine) `sepEndBy` newline >>=
-           return . fst . mergeTriggers . mergeVariables . (C [] [],) . cleanLines
+           return . revertTriggers . nubVariables . fst .
+           mergeTriggers . mergeVariables . (C [] [],) . cleanLines
 
 emptyLine :: Parser ConfigLine
 emptyLine = many spaces >> return CLEmpty
@@ -180,7 +155,9 @@ configTriggerActionNotification = do
                             Nothing -> return (nsummary, nicon, 0, NUNormal)
                             Just ntimeout -> do
                                 many spaces
-                                nurgency' <- optionMaybe (string "low" <|> string "normal" <|> string "critical")
+                                nurgency' <- optionMaybe (string "low" <|>
+                                                          string "normal" <|>
+                                                          string "critical")
                                 case nurgency' of
                                     Nothing -> return (nsummary, nicon, ntimeout, NUNormal)
                                     Just nurgency -> return (nsummary, nicon, ntimeout, NUNormal)
