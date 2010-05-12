@@ -7,12 +7,22 @@ module UDisksEvt.Config (
     ) where
 
 import Control.Monad.State
+import qualified Data.Map as M
 import Text.Parsec hiding (spaces, State)
 import Text.Parsec.Combinator
 import Text.Parsec.String
+import System.IO
 
 import UDisksEvt.Datatypes
 
+defaultConfig :: Configuration
+defaultConfig = C { cVars = M.fromList [ ("start-udisks-daemon", CVBool True)
+                                       , ("shell-command", CVString "/bin/bash")
+                                       ]
+                  , cTriggers = M.empty
+                  } 
+
+-- Reads and parses configuration from specified file
 readConfiguration :: FilePath -> IO (Maybe Configuration)
 readConfiguration fname = do
     fdata <- readFile fname
@@ -22,71 +32,45 @@ readConfiguration fname = do
             return Nothing
         Right c -> return (Just c)
 
-mPutLine :: ConfigLine -> State (Configuration, [ConfigLine]) () 
-mPutLine ln = do
-    (conf, lst) <- get
-    put (conf, ln:lst)
-
-mChangeConfig :: (Configuration -> Configuration) -> State (Configuration, [ConfigLine]) ()
-mChangeConfig f = do
-    (conf, lst) <- get
-    put (f conf, lst)
-
-revertTriggers :: Configuration -> Configuration
-revertTriggers
-
-mergeVariables :: (Configuration, [ConfigLine]) -> (Configuration, [ConfigLine])
-mergeVariables (conf, lst) = execState (merger lst) (conf, [])
+-- Converts list of configuration lines to Configuration structure
+convertStructure :: [ConfigLine] -> Configuration
+convertStructure lst = execState (merger lst "") defaultConfig
     where
-        merger :: [ConfigLine] -> State (Configuration, [ConfigLine]) ()
-        merger [] = return ()
-        merger (x:xs) = do
-            case x of
-                CLVar cvar -> mChangeConfig (addVariable cvar)
-                _ -> mPutLine x
-            merger xs
+        merger :: [ConfigLine] -> String -> State Configuration ()
+        merger [] _ = return ()
+        merger (x:xs) ltn = do
+            trigname <- case x of
+                CLVar cvn cvv -> modify (addVariable cvn cvv) >> return ltn
+                CLTrigger ctn -> modify (addTrigger ctn) >> return ctn
+                CLTriggerAction cta -> modify (modifyTrigger ltn cta) >> return ltn
+                _ -> return ltn
+            merger xs trigname
 
-        addVariable :: ConfigVar -> Configuration -> Configuration
-        addVariable cvar c@(C { cVars = cvars }) = c { cVars = cvar:cvars }
-
-mergeTriggers :: (Configuration, [ConfigLine]) -> (Configuration, [ConfigLine])
-mergeTriggers (conf, lst) = execState (merger lst) (conf, [])
-    where
-        merger :: [ConfigLine] -> State (Configuration, [ConfigLine]) ()
-        merger [] = return ()
-        merger (x:xs) = do
-            case x of
-                CLTrigger ctname -> mChangeConfig (insertTrigger (CTrigger ctname []))
-                CLTriggerAction cta -> mChangeConfig (modifyLastTrigger cta)
-                _ -> mPutLine x
-            merger xs
-            
-        insertTrigger :: ConfigTrigger -> Configuration -> Configuration
-        insertTrigger ct c@(C { cTriggers = cts }) = c { cTriggers = ct:cts }
-
-        modifyLastTrigger :: ConfigTriggerAction -> Configuration -> Configuration
-        modifyLastTrigger cta c@(C { cTriggers = ct@(CTrigger { ctActions = ctas }):cts }) =
-            c { cTriggers = (ct { ctActions = cta:ctas } ):cts }
-
-cleanLines :: [ConfigLine] -> [ConfigLine]
-cleanLines = filter f
-    where
-        f CLEmpty = False
-        f CLComment = False
-        f _ = True
+        addVariable :: String -> ConfigVarValue -> Configuration -> Configuration
+        addVariable cvn cvv c@(C { cVars = cvars }) =
+            c { cVars = M.insert cvn cvv cvars }        
+        
+        addTrigger :: String -> Configuration -> Configuration
+        addTrigger ctn c@(C { cTriggers = cts }) = c { cTriggers = M.insert ctn [] cts }
+        
+        modifyTrigger :: String -> ConfigTriggerAction -> Configuration -> Configuration
+        modifyTrigger ltn cta c@(C { cTriggers = cts }) = c { cTriggers = ncts }
+            where
+                ncts = M.insertWith (flip (++)) ltn [cta] cts
 
 -- Main parser - while as whole
 fileData :: Parser Configuration
-fileData = (fileLine <|> emptyLine <|> commentLine) `sepEndBy` newline >>=
-           return . revertTriggers . nubVariables . fst .
-           mergeTriggers . mergeVariables . (C [] [],) . cleanLines
+fileData = (many spaces >> (commentLine <|> fileLine <|> emptyLine)) `sepEndBy` newline >>=
+ --          (\x -> return $ unsafePerformIO (print x >> return x)) >>=
+           return . convertStructure
 
+-- Empty line - just 'id', because spaces already taken into account
 emptyLine :: Parser ConfigLine
-emptyLine = many spaces >> return CLEmpty
+emptyLine = return CLEmpty
 
+-- Comment line
 commentLine :: Parser ConfigLine
 commentLine = do
-    many spaces
     char '#'
     many (noneOf "\r\n")
     return CLComment
@@ -94,7 +78,6 @@ commentLine = do
 -- File line with data
 fileLine :: Parser ConfigLine
 fileLine = do
-    many spaces
     fline <- configVar <|>
              configTrigger <|>
              configTriggerActionShellCommand <|>
@@ -107,12 +90,12 @@ configVar :: Parser ConfigLine
 configVar = do
     string "set"
     many spaces
-    cvname <- many1 letter
+    cvname <- many1 (alphaNum <|> char '-')
     many spaces
     char '='
     many spaces
     cvvalue <- configVarString <|> configVarInt <|> configVarBool
-    return (CLVar (CVar cvname cvvalue))
+    return (CLVar cvname cvvalue)
 
 -- Configuration trigger
 configTrigger :: Parser ConfigLine
@@ -138,6 +121,8 @@ configTriggerActionNotification = do
     string "notify"
     many spaces
     nbody <- quoted mstring1
+    -- This complicated structure parses 4 optional parameters of different types
+    -- I have a feeling that this can be done more easily
     (nsummary, nicon, ntimeout, nurgency) <- do
         many spaces
         nsummary' <- optionMaybe (quoted mstring)
@@ -163,30 +148,38 @@ configTriggerActionNotification = do
                                     Just nurgency -> return (nsummary, nicon, ntimeout, NUNormal)
     return (CLTriggerAction (CTANotification nbody nsummary nicon ntimeout nurgency))
 
-
+-- Config variable string value
 configVarString :: Parser ConfigVarValue
 configVarString = quoted mstring >>= return . CVString
 
+-- Config variable positive integer value
 configVarInt :: Parser ConfigVarValue
 configVarInt = number >>= return . CVInt
 
+-- Config variable boolean value
 configVarBool = (string "yes" <|> string "no") >>= return . CVBool . readBool
     where
         readBool "yes" = True
         readBool "no"  = False
         readBool _     = undefined
 
+-- Quoted something
 quoted :: Parser a -> Parser a
 quoted = between (char '"') (char '"')
 
+-- String that can be used in quotes, possibly empty
 mstring :: Parser String
 mstring = many (noneOf "\"\r\n")
 
+-- Non-empty string
 mstring1 :: Parser String
 mstring1 = many1 (noneOf "\"\r\n")
 
+-- Just sequence of digits
 number :: Parser Int
 number = many1 digit >>= return . read
 
+-- Redefinition of the same parser in library,
+-- because we don't need newline and such thing as spaces
 spaces :: Parser Char
 spaces = oneOf " \t"

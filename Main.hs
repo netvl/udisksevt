@@ -5,10 +5,11 @@
 module Main where
 
 import UDisksEvt.Config
+import UDisksEvt.Datatypes
 import UDisksEvt.UDisks
 
 main :: IO ()
 main = do
-    dv <- enumerateDevices
-    mapM_ putStrLn dv
+    conf <- readConfiguration "udisksevt.conf"
+    print conf
     return ()

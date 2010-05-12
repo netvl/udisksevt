@@ -2,31 +2,21 @@
 -- Copyright (C) DPX-Infinity, 2010
 -- Datatypes collection module
 
-module UDiskeEvt.Datatypes where
+module UDisksEvt.Datatypes where
+
+import Data.Map
 
 -- Main configuration datatype
-data Configuration = C { cVars :: [ConfigVar]
-                       , cTriggers :: [ConfigTrigger]
+data Configuration = C { cVars :: Map String ConfigVarValue
+                       , cTriggers :: Map String [ConfigTriggerAction]
                        }
                    deriving (Show)
-
--- Configuration variable datatype
-data ConfigVar = CVar { cvName :: String
-                      , cvValue :: ConfigVarValue
-                      }
-               deriving (Show)
 
 -- Configuration variable value
 data ConfigVarValue = CVString String
                     | CVBool Bool
                     | CVInt Int
                     deriving (Show)
-
--- Configuration trigger - an event on which some commands can be run
-data ConfigTrigger = CTrigger { ctName :: String
-                              , ctActions :: [ConfigTriggerAction]
-                              }
-                   deriving (Show)
 
 -- Configuration trigger action - these commands definition
 data ConfigTriggerAction = CTAShellCommand { ctascCommand :: String
@@ -46,7 +36,7 @@ data NotificationUrgency = NULow
                          deriving (Show)
 
 -- Intermediate structure used in config parsing
-data ConfigLine = CLVar ConfigVar
+data ConfigLine = CLVar String ConfigVarValue
                 | CLTrigger String
                 | CLTriggerAction ConfigTriggerAction
                 | CLEmpty
