@@ -2,9 +2,10 @@
 -- Copyright (C) DPX-Infinity, 2010
 -- Configuration module
 
-module UDisksEvt.Config (
-    readConfiguration
-    ) where
+module UDisksEvt.Config ( readConfiguration
+                        , getVariable
+                        , getTrigger
+                        ) where
 
 import Control.Monad.State
 import qualified Data.Map as M
@@ -15,12 +16,22 @@ import System.IO
 
 import UDisksEvt.Datatypes
 
+-- Default configuration
 defaultConfig :: Configuration
 defaultConfig = C { cVars = M.fromList [ ("start-udisks-daemon", CVBool True)
                                        , ("shell-command", CVString "/bin/bash")
+                                       , ("show-error-notifications", CVBool True)
                                        ]
                   , cTriggers = M.empty
-                  } 
+                  }
+
+-- Extract variable from Configuration
+getVariable :: Configuration -> String -> Maybe ConfigVarValue
+getVariable conf cvn = M.lookup cvn (cVars conf)
+
+-- Extract list of trigger actions from Configuration
+getTrigger :: Configuration -> String -> Maybe [ConfigTriggerAction]
+getTrigger conf ctn = M.lookup ctn (cTriggers conf)
 
 -- Reads and parses configuration from specified file
 readConfiguration :: FilePath -> IO (Maybe Configuration)
