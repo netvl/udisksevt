@@ -5,9 +5,10 @@
 module UDisksEvt.Datatypes where
 
 import Data.Map
+import Control.Concurrent.STM
 
 -- Main configuration datatype
-data Configuration = C { cVars :: Map String ConfigVarValue
+data Configuration = C { cVars     :: Map String ConfigVarValue
                        , cTriggers :: Map String [ConfigTriggerAction]
                        }
                    deriving (Show)
@@ -21,9 +22,9 @@ data ConfigVarValue = CVString String
 -- Configuration trigger action - these commands definition
 data ConfigTriggerAction = CTAShellCommand { ctascCommand :: String
                                            }
-                         | CTANotification { ctanBody :: String
+                         | CTANotification { ctanBody    :: String
                                            , ctanSummary :: String
-                                           , ctanIcon :: String
+                                           , ctanIcon    :: String
                                            , ctanTimeout :: Int	
                                            , ctanUrgency :: NotificationUrgency
                                            }
@@ -42,3 +43,15 @@ data ConfigLine = CLVar String ConfigVarValue
                 | CLEmpty
                 | CLComment
                 deriving (Show)
+
+-- Device information structure, used for caching
+data DeviceInfo = DInfo { diObjectPath :: String
+                        , diDeviceFile :: String
+                        , diMountPoint :: Maybe String
+                        , diLabel      :: String
+                        } deriving (Show)
+
+-- Global state datatype
+data UState = U { uConfig :: Configuration
+                , uDevices :: TVar (Map String DeviceInfo)
+                }
