@@ -15,10 +15,12 @@ import DBus.Client
 import DBus.MatchRule as MR
 import DBus.Message
 import DBus.Types
+import System.Process (runCommand)
 
 import UDisksEvt.Config
 import UDisksEvt.Datatypes
 
+-- Triggers - match rules mapping
 triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                  , matchSender = Just "org.freedesktop.UDisks"
                                  , matchDestination = Nothing
@@ -54,17 +56,29 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                          [StringValue 3 "FilesystemUnmount"]
                                      })
            ]
-           
+
+-- Proxy for /org/freedesktop/UDisks object
 udisksProxy = Proxy (RemoteObject "org.freedesktop.UDisks" "/org/freedesktop/UDisks")
               "org.freedesktop.UDisks"
 
+-- Proxy for arbitrary device for device methods
 deviceProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
                   "org.freedesktop.UDisks.Device"
 
+-- Proxy for arbitrary device for device properties
 devicePropertyProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
                          "org.freedesktop.DBus.Properties"
 
+-- Notification daemon proxy
+notificationProxy =
+    Proxy (RemoteObject "org.freedesktop.Notifications" "/org/freedesktop/Notifications")
+    "org.freedesktop.Notifications"
+
+-- Get system bus Client object
 systemBusClient = mkClient =<< getSystemBus
+
+-- Get session bus Client object
+sessionBusClient = mkClient =<< getSessionBus
 
 logDBusError = undefined
 
@@ -74,9 +88,23 @@ logTriggerError = undefined
 
 logDeviceInfoError = undefined
 
-runShell = undefined
+logRunningCommand = undefined
 
-showNotification = undefined
+-- Run shell command
+runShell :: (?st :: UState) => String -> IO ()
+runShell cmd = do
+    let CVString sh = fromJust $ M.lookup "shell-command" $ cVars $ uConfig ?st
+    let shcmd = sh ++ " -c '" ++ cmd ++ "'"
+    logRunningCommand shcmd
+    runCommand shcmd
+    return ()
+
+-- Show notification using D-Bus org.freedesktop.Notifications server, if present
+showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency
+                    -> IO ()
+showNotification body summary icon timeout urgency = do
+    client <- getSessionBus
+    return ()
 
 -- Checks if device is system internal
 isDeviceInternal :: ObjectPath -> IO Bool
@@ -120,7 +148,9 @@ runSignalHandlers :: Configuration -> IO ()
 runSignalHandlers conf = do
     client <- systemBusClient
     devs <- newTVarIO M.empty
+    -- Set initial state
     let ?st = U conf devs
+    -- Set signals based on triggers mapping
     mapM_ (setSignal client) triggers
     where
         setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
@@ -183,8 +213,15 @@ getDeviceInfo obj = do
                                  , diMountPoint = Just "<unknown>"
                                  , diLabel = "<unknown>"
                                  }
-                -- Ok, returning data from cache
-                Just d -> return d
+                -- Ok, delete device from cache, because the only reason to cache access
+                -- is device removal
+                -- Return device info then
+                Just d -> do
+                    atomically $ do
+                        devs <- readTVar (uDevices ?st)
+                        writeTVar (uDevices ?st) $ M.delete (B.unpack $ strObjectPath obj) devs
+                    return d
+
         -- Request successful, using in
         Just props -> do
             -- Retrieve needed properties
@@ -205,16 +242,23 @@ getDeviceInfo obj = do
                                                 else Nothing
                                , diLabel = fromJust $ maybe (Just "<unknown>") fromVariant dlabel
                                }
-            -- TODO: Update cache
+            atomically $ do
+                devs <- readTVar (uDevices ?st)
+                writeTVar (uDevices ?st) $ M.insert dobjpath dinfo devs
             -- Return data
             return dinfo
 
 -- Get cached device information; this may fail
 getCachedDeviceInfo :: (?st :: UState) => ObjectPath -> IO (Maybe DeviceInfo)
 getCachedDeviceInfo obj = do
-    devs <- atomically $ readTVar $ uDevices ?st  -- Get cache map
+    devs <- atomically $ readTVar (uDevices ?st)  -- Get cache map
     return $ M.lookup (B.unpack $ strObjectPath obj) devs
 
+-- Performs substring replace to transfer device information to shell commands/notifications
 substituteParameters :: (?st :: UState) => DeviceInfo -> String -> String
-substituteParameters dev str = undefined
-    
+substituteParameters dev = replace "$DEVICE$" (diDeviceFile dev) .
+                           maybe (replace "$MOUNTPATH$" "<not mounted>")
+                                 (replace "$MOUNTPATH$") (diMountPoint dev) .
+                           replace "$LABEL$" (diLabel dev) .
+                           replace "$OBJECTPATH$" (diObjectPath dev)
+
