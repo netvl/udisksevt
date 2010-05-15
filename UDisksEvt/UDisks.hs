@@ -8,14 +8,16 @@ import Control.Concurrent.STM
 import Control.Monad
 import qualified Data.Map as M
 import qualified Data.Text.Lazy as B
+import Data.Int
 import Data.List
 import Data.Maybe
+import Data.Word
 import DBus.Bus
 import DBus.Client
 import DBus.MatchRule as MR
 import DBus.Message
 import DBus.Types
-import System.Process (runCommand)
+import System.Process
 
 import UDisksEvt.Config
 import UDisksEvt.Datatypes
@@ -90,6 +92,10 @@ logDeviceInfoError = undefined
 
 logRunningCommand = undefined
 
+logNotifyError = undefined
+
+logNotifyOk = undefined
+
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
 runShell cmd = do
@@ -103,7 +109,25 @@ runShell cmd = do
 showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency
                     -> IO ()
 showNotification body summary icon timeout urgency = do
-    client <- getSessionBus
+    client <- sessionBusClient
+    let actions = fromJust $ toArray DBusString ([] :: [String])
+    let nurgency = case urgency of
+            NULow -> 0 :: Word8
+            NUNormal -> 1
+            NUCritical -> 2
+    let hints = fromJust $
+                dictionaryFromItems DBusString DBusVariant
+                    [(toVariant ("urgency" :: String), toVariant $ toVariant nurgency)]
+    callProxy client notificationProxy "Notify" [] [ toVariant ("UDisksEvt" :: String)
+                                                   , toVariant (0 :: Word32)
+                                                   , toVariant icon
+                                                   , toVariant summary
+                                                   , toVariant body
+                                                   , toVariant actions
+                                                   , toVariant hints
+                                                   , toVariant (fromIntegral timeout :: Int32)
+                                                   ]
+        logNotifyError logNotifyOk
     return ()
 
 -- Checks if device is system internal

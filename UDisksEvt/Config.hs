@@ -165,7 +165,7 @@ configVarString = quoted mstring >>= return . CVString
 
 -- Config variable positive integer value
 configVarInt :: Parser ConfigVarValue
-configVarInt = number >>= return . CVInt
+configVarInt = signed number >>= return . CVInt
 
 -- Config variable boolean value
 configVarBool = (string "yes" <|> string "no") >>= return . CVBool . readBool
@@ -189,6 +189,14 @@ mstring1 = many1 (noneOf "\"\r\n")
 -- Just sequence of digits
 number :: Parser Int
 number = many1 digit >>= return . read
+
+-- Signed integer
+signed :: Parser Int -> Parser Int
+signed p = do
+    sgn <- option '+' (char '-' <|> char '+')
+    case sgn of
+        '+' -> p
+        '-' -> p >>= return . negate
 
 -- Redefinition of the same parser in library,
 -- because we don't need newline and such thing as spaces

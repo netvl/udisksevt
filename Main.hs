@@ -7,9 +7,13 @@ module Main where
 import UDisksEvt.Config
 import UDisksEvt.Datatypes
 import UDisksEvt.UDisks
+import Control.Concurrent.STM
+import qualified Data.Map as M
 
 main :: IO ()
 main = do
-    conf <- readConfiguration "udisksevt.conf"
-    print conf
+    Just conf <- readConfiguration "udisksevt.conf"
+    devs <- newTVarIO M.empty
+    let ?st = U conf devs
+    showNotification "test" "test" "" 5000 NUNormal
     return ()
