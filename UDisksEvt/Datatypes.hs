@@ -17,7 +17,7 @@ data Configuration = C { cVars     :: Map String ConfigVarValue
 data ConfigVarValue = CVString String
                     | CVBool Bool
                     | CVInt Int
-                    deriving (Show)
+                    deriving (Show, Eq)
 
 -- Configuration trigger action - these commands definition
 data ConfigTriggerAction = CTAShellCommand { ctascCommand :: String

@@ -34,15 +34,17 @@ getTrigger :: Configuration -> String -> Maybe [ConfigTriggerAction]
 getTrigger conf ctn = M.lookup ctn (cTriggers conf)
 
 -- Reads and parses configuration from specified file
-readConfiguration :: FilePath -> IO (Maybe Configuration)
+readConfiguration :: FilePath -> IO Configuration
 readConfiguration fname = do
     fdata <- readFile fname
     case parse fileData fname fdata of
         Left e -> do
             hPutStrLn stderr $ "Error parsing config file " ++ fname ++ ": " ++ show e
-            return Nothing
-        Right c -> return (Just c)
-
+            return defaultConfig
+        Right c -> return defaultConfig { cTriggers = cTriggers c
+                                        , cVars = cVars defaultConfig `M.union` cVars c
+                                        }
+    
 -- Converts list of configuration lines to Configuration structure
 convertStructure :: [ConfigLine] -> Configuration
 convertStructure lst = execState (merger lst "") defaultConfig
@@ -138,17 +140,17 @@ configTriggerActionNotification = do
         many spaces
         nsummary' <- optionMaybe (quoted mstring)
         case nsummary' of
-            Nothing -> return ("", "", 0, NUNormal)
+            Nothing -> return ("", "", -1, NUNormal)
             Just nsummary -> do
                 many spaces
                 nicon' <- optionMaybe (quoted mstring)
                 case nicon' of
-                    Nothing -> return (nsummary, "", 0, NUNormal)
+                    Nothing -> return (nsummary, "", -1, NUNormal)
                     Just nicon -> do
                         many spaces
                         ntimeout' <- optionMaybe number
                         case ntimeout' of
-                            Nothing -> return (nsummary, nicon, 0, NUNormal)
+                            Nothing -> return (nsummary, nicon, -1, NUNormal)
                             Just ntimeout -> do
                                 many spaces
                                 nurgency' <- optionMaybe (string "low" <|>

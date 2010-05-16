@@ -2,7 +2,9 @@
 -- Copyright (C) DPX-Infinity, 2010
 -- Module for communicating with UDisks through D-Bus
 
-module UDisksEvt.UDisks where
+module UDisksEvt.UDisks ( wakeDaemon
+                        , runSignalHandlers
+                        ) where
 
 import Control.Concurrent.STM
 import Control.Monad
@@ -17,6 +19,7 @@ import DBus.Client
 import DBus.MatchRule as MR
 import DBus.Message
 import DBus.Types
+import System.IO
 import System.Process
 
 import UDisksEvt.Config
@@ -24,7 +27,7 @@ import UDisksEvt.Datatypes
 
 -- Triggers - match rules mapping
 triggers = [ ("added", MatchRule { matchType = Just MR.Signal
-                                 , matchSender = Just "org.freedesktop.UDisks"
+                                 , matchSender = Nothing
                                  , matchDestination = Nothing
                                  , matchPath = Just "/org/freedesktop/UDisks"
                                  , matchInterface = Just "org.freedesktop.UDisks"
@@ -32,7 +35,7 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                  , matchParameters = []
                                  })
            , ("removed", MatchRule { matchType = Just MR.Signal
-                                   , matchSender = Just "org.freedesktop.UDisks"
+                                   , matchSender = Nothing
                                    , matchDestination = Nothing
                                    , matchPath = Just "/org/freedesktop/UDisks"
                                    , matchInterface = Just "org.freedesktop.UDisks"
@@ -40,7 +43,7 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                    , matchParameters = []
                                    })
            , ("mounted", MatchRule { matchType = Just MR.Signal
-                                   , matchSender = Just "org.freedesktop.UDisks"
+                                   , matchSender = Nothing
                                    , matchDestination = Nothing
                                    , matchPath = Just "/org/freedesktop/UDisks"
                                    , matchInterface = Just "org.freedesktop.UDisks"
@@ -49,7 +52,7 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                        [StringValue 3 "FilesystemMount"]
                                    })
            , ("unmounted", MatchRule { matchType = Just MR.Signal
-                                     , matchSender = Just "org.freedesktop.UDisks"
+                                     , matchSender = Nothing
                                      , matchDestination = Nothing
                                      , matchPath = Just "/org/freedesktop/UDisks"
                                      , matchInterface = Just "org.freedesktop.UDisks"
@@ -82,19 +85,47 @@ systemBusClient = mkClient =<< getSystemBus
 -- Get session bus Client object
 sessionBusClient = mkClient =<< getSessionBus
 
-logDBusError = undefined
+-- Print simple log message; now using only stdout
+logOk :: String -> IO ()
+logOk = putStrLn
 
-logDaemonStartup = undefined
+-- Print error message; now using only stderr
+logError :: String -> IO ()
+logError = hPutStrLn stderr
 
-logTriggerError = undefined
+-- Log DBus error; now used only in daemon startup routine
+logDBusError :: Error -> IO ()
+logDBusError err = logError $ "Coulnd't startup UDisks daemon:\n\t" ++ show err
 
-logDeviceInfoError = undefined
+-- Log UDisks daemon startup
+logDaemonStartup :: MethodReturn -> IO ()
+logDaemonStartup _ = logOk $ "UDisks daemon successfully started!"
 
-logRunningCommand = undefined
+-- Trying to launch an unspecified trigger
+logTriggerError :: String -> IO ()
+logTriggerError rtype = logError $ "Trying to launch trigger undefined in configuration;" ++ 
+                  "it's safe do this if you don't need any actions:\n\t" ++ show rtype
 
-logNotifyError = undefined
+-- Can't get device info neither from UDisks nor from cache
+logDeviceInfoError :: ObjectPath -> IO ()
+logDeviceInfoError obj = logError $
+    "Cannot get device info: it's not in UDisks database nor in device cache:\n\t" ++ show obj
 
-logNotifyOk = undefined
+-- Log command running
+logRunningCommand :: String -> IO ()
+logRunningCommand cmd = logOk $ "Running command:\n\t" ++ show cmd
+
+-- Print that there was an error with notification sending
+logNotifyError :: String -> String -> Error -> IO ()
+logNotifyError summary body err = do
+    let errname = B.unpack $ strErrorName $ errorName err
+    logError $ "Error sending notification: " ++ errname ++
+        ":\n\t" ++ show summary ++ " " ++ show body
+
+-- Print that notification sending was ok
+logNotifyOk :: String -> String -> MethodReturn -> IO ()
+logNotifyOk summary body _ =
+    logOk $ "Successfully sent notification:\n\t" ++ show summary ++ " " ++ show body
 
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
@@ -127,8 +158,10 @@ showNotification body summary icon timeout urgency = do
                                                    , toVariant hints
                                                    , toVariant (fromIntegral timeout :: Int32)
                                                    ]
-        logNotifyError logNotifyOk
+        (logNotifyError summary body) (logNotifyOk summary body)
     return ()
+
+--- WE NEED TO USE CACHE IN THESE 2 FUNCTIONS ---
 
 -- Checks if device is system internal
 isDeviceInternal :: ObjectPath -> IO Bool
@@ -139,9 +172,21 @@ isDeviceInternal obj = do
     case response of
         Left _ -> return False
         Right resp ->
-            let Just isinternal = fromVariant $ head $ messageBody resp
+            let Just isinternal = fromVariant =<< (fromVariant $ head $ messageBody resp)
             in return isinternal
-        
+
+-- Checks is device is mountable filesystem
+isDeviceFilesystem :: ObjectPath -> IO Bool
+isDeviceFilesystem obj = do
+    client <- systemBusClient
+    response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
+        map toVariant (["org.freedesktop.UDisks.Device", "IdUsage"] :: [String])
+    case response of
+        Left _ -> return False
+        Right resp ->
+            let Just devtype = fromVariant =<< (fromVariant $ head $ messageBody resp)
+            in return $ devtype == ("filesystem" :: String)
+
 -- http://bluebones.net/2007/01/replace-in-haskell/ - Joseph's function
 replace :: (Eq a) => [a] -> [a] -> [a] -> [a]
 replace [] _ list = list
@@ -190,11 +235,15 @@ signalDispatcher rtype bname sig = runTrigger rtype obj
 runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
 runTrigger rtype obj = do
     -- Exit if device is internal - we do not have to act on such devices
-    isDeviceInternal obj >>= (flip when) (return ())
-    let mctas = getTrigger (uConfig ?st) rtype
-    case mctas of
-        Nothing -> logTriggerError rtype
-        Just ctas -> mapM_ (executeTriggerAction obj) ctas
+    internal <- isDeviceInternal obj
+    when (not internal) $ do
+        -- Exit if device is not filesystem
+        filesystem <- isDeviceFilesystem obj
+        when filesystem $ do
+            let mctas = getTrigger (uConfig ?st) rtype
+            case mctas of
+                Nothing -> logTriggerError rtype
+                Just ctas -> mapM_ (executeTriggerAction obj) ctas
 
 -- Executes trigger action
 executeTriggerAction :: (?st :: UState) => ObjectPath -> ConfigTriggerAction -> IO ()
