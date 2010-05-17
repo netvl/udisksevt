@@ -35,8 +35,8 @@ parseArgs :: [String] -> IO (String, Bool)
 parseArgs argv = case getOpt Permute table argv of
     (opts, _, []) -> do
         let daemonize = Daemonize `elem` opts
-        confpath <- configPath
-        let confpath = foldr selectConfPath confpath opts
+        cpath <- configPath
+        let confpath = foldr selectConfPath cpath opts
         return (confpath, daemonize)
     (_, _, errs) -> do
         hPutStrLn stderr $ concat errs ++
@@ -47,9 +47,9 @@ parseArgs argv = case getOpt Permute table argv of
         selectConfPath (ConfigFile c) _ = c
         selectConfPath _ c = c
 
--- Fork to background and do other useful things
-doDaemonize :: IO ()
-doDaemonize = do
+-- Fork to background using action and do other useful things
+doDaemonize :: IO () -> IO ()
+doDaemonize prog = do
     forkProcess $ do
         createSession
         forkProcess $ do
@@ -57,26 +57,32 @@ doDaemonize = do
             mapM_ closeFd [stdInput, stdOutput, stdError]
             mapM_ (dupTo nullFd) [stdInput, stdOutput, stdError]
             closeFd nullFd
+            prog
         exitImmediately ExitSuccess
+    putStrLn "Forked to background."
     exitImmediately ExitSuccess
 
 main :: IO ()
 main = do
-    putStr "Parsing arguments... "
     (confpath, daemonize) <- parseArgs =<< getArgs
-    putStrLn "Done."
     putStr "Reading configuration... "
     conf <- readConfiguration confpath
     putStrLn "Done."
-    when daemonize $ doDaemonize
-    -- Wake up UDisks daemon
-    case M.lookup "start-udisks-daemon" (cVars conf) of
-        Just (CVBool True) -> do
-            putStrLn "Starting UDisks daemon..."
-            wakeDaemon
-        _ -> return ()
-    putStr "Setting up D-Bus signal handlers... "
-    runSignalHandlers conf
-    putStrLn "Done."
-    putStrLn "Entering endless loop."
-    forever $ threadDelay 10000000
+    if daemonize  -- Fork to background if needed
+        then doDaemonize (prog conf)
+        else prog conf
+        
+    where
+        prog :: Configuration -> IO ()  -- Main program
+        prog conf = do
+            -- Wake up UDisks daemon
+            case M.lookup "start-udisks-daemon" (cVars conf) of
+                Just (CVBool True) -> do
+                    putStrLn "Starting UDisks daemon..."
+                    wakeDaemon
+                _ -> return ()
+            putStr "Setting up D-Bus signal handlers... "
+            runSignalHandlers conf  -- Set UDisks signal handlers
+            putStrLn "Done."
+            putStrLn "Entering endless loop."
+            forever $ threadDelay 10000000   -- Loop forever
