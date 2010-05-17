@@ -1,8 +1,8 @@
 Name: udisksevt
-Version: 0.1
+Version: 0.5
 Cabal-Version: >=1.2
 Build-Type: Simple
-License: GPL
+License: GPL-2
 License-File: LICENSE
 Author: DPX-Infinity
 Homepage: http://dpx-infinity.vfose.ru/

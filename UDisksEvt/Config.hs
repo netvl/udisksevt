@@ -20,7 +20,7 @@ import UDisksEvt.Datatypes
 defaultConfig :: Configuration
 defaultConfig = C { cVars = M.fromList [ ("start-udisks-daemon", CVBool True)
                                        , ("shell-command", CVString "/bin/bash")
-                                       , ("show-error-notifications", CVBool True)
+                                       , ("default-notification-icon", CVString "")
                                        ]
                   , cTriggers = M.empty
                   }
@@ -42,7 +42,7 @@ readConfiguration fname = do
             hPutStrLn stderr $ "Error parsing config file " ++ fname ++ ": " ++ show e
             return defaultConfig
         Right c -> return defaultConfig { cTriggers = cTriggers c
-                                        , cVars = cVars defaultConfig `M.union` cVars c
+                                        , cVars = cVars c `M.union` cVars defaultConfig 
                                         }
     
 -- Converts list of configuration lines to Configuration structure
@@ -140,12 +140,12 @@ configTriggerActionNotification = do
         many spaces
         nsummary' <- optionMaybe (quoted mstring)
         case nsummary' of
-            Nothing -> return ("", "", -1, NUNormal)
+            Nothing -> return ("", "default", -1, NUNormal)
             Just nsummary -> do
                 many spaces
                 nicon' <- optionMaybe (quoted mstring)
                 case nicon' of
-                    Nothing -> return (nsummary, "", -1, NUNormal)
+                    Nothing -> return (nsummary, "default", -1, NUNormal)
                     Just nicon -> do
                         many spaces
                         ntimeout' <- optionMaybe number

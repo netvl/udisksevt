@@ -6,6 +6,7 @@ module UDisksEvt.UDisks ( wakeDaemon
                         , runSignalHandlers
                         ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
 import Control.Monad
 import qualified Data.Map as M
@@ -20,6 +21,7 @@ import DBus.MatchRule as MR
 import DBus.Message
 import DBus.Types
 import System.IO
+import System.Environment
 import System.Process
 
 import UDisksEvt.Config
@@ -49,7 +51,7 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                    , matchInterface = Just "org.freedesktop.UDisks"
                                    , matchMember = Just "DeviceJobChanged"
                                    , matchParameters =
-                                       [StringValue 3 "FilesystemMount"]
+                                       [StringValue 2 "FilesystemMount"]
                                    })
            , ("unmounted", MatchRule { matchType = Just MR.Signal
                                      , matchSender = Nothing
@@ -58,7 +60,7 @@ triggers = [ ("added", MatchRule { matchType = Just MR.Signal
                                      , matchInterface = Just "org.freedesktop.UDisks"
                                      , matchMember = Just "DeviceJobChanged"
                                      , matchParameters =
-                                         [StringValue 3 "FilesystemUnmount"]
+                                         [StringValue 2 "FilesystemUnmount"]
                                      })
            ]
 
@@ -123,9 +125,10 @@ logNotifyError summary body err = do
         ":\n\t" ++ show summary ++ " " ++ show body
 
 -- Print that notification sending was ok
-logNotifyOk :: String -> String -> MethodReturn -> IO ()
-logNotifyOk summary body _ =
-    logOk $ "Successfully sent notification:\n\t" ++ show summary ++ " " ++ show body
+logNotifyOk :: String -> String -> String -> MethodReturn -> IO ()
+logNotifyOk summary body icon _ =
+    logOk $ "Successfully sent notification:\n\t" ++ show summary ++ " " ++ show body ++ 
+    " " ++ show icon
 
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
@@ -149,41 +152,53 @@ showNotification body summary icon timeout urgency = do
     let hints = fromJust $
                 dictionaryFromItems DBusString DBusVariant
                     [(toVariant ("urgency" :: String), toVariant $ toVariant nurgency)]
+    homepath <- getEnv "HOME"
+    let CVString ricon = if icon /= "default"
+                         then CVString icon
+                         else fromJust $ M.lookup "default-notification-icon" $ cVars $
+                              uConfig ?st
+    let ricon' = replace "$HOME$" homepath ricon
     callProxy client notificationProxy "Notify" [] [ toVariant ("UDisksEvt" :: String)
                                                    , toVariant (0 :: Word32)
-                                                   , toVariant icon
+                                                   , toVariant ricon'
                                                    , toVariant summary
                                                    , toVariant body
                                                    , toVariant actions
                                                    , toVariant hints
                                                    , toVariant (fromIntegral timeout :: Int32)
                                                    ]
-        (logNotifyError summary body) (logNotifyOk summary body)
+        (logNotifyError summary body) (logNotifyOk summary body ricon')
     return ()
 
---- WE NEED TO USE CACHE IN THESE 2 FUNCTIONS ---
-
 -- Checks if device is system internal
-isDeviceInternal :: ObjectPath -> IO Bool
+isDeviceInternal :: (?st :: UState) => ObjectPath -> IO Bool
 isDeviceInternal obj = do
     client <- systemBusClient
     response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
         map toVariant (["org.freedesktop.UDisks.Device", "DeviceIsSystemInternal"] :: [String])
     case response of
-        Left _ -> return False
-        Right resp ->
+        Left _ -> do  -- Error, trying to get value from cache
+            dev <- getCachedDeviceInfo obj
+            case dev of
+                Nothing -> return False
+                Just d -> return $ diInternal d
+        Right resp ->  -- Ok, get actual value
             let Just isinternal = fromVariant =<< (fromVariant $ head $ messageBody resp)
             in return isinternal
 
 -- Checks is device is mountable filesystem
-isDeviceFilesystem :: ObjectPath -> IO Bool
+isDeviceFilesystem :: (?st :: UState) => ObjectPath -> IO Bool
 isDeviceFilesystem obj = do
     client <- systemBusClient
     response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
         map toVariant (["org.freedesktop.UDisks.Device", "IdUsage"] :: [String])
     case response of
-        Left _ -> return False
-        Right resp ->
+        Left _ -> do  -- Error, trying to get value from cache
+            dev <- getCachedDeviceInfo obj
+            case dev of
+                Nothing -> return False
+                Just d -> return $ diFSystem d
+        Right resp ->  -- Ok, get actual value
             let Just devtype = fromVariant =<< (fromVariant $ head $ messageBody resp)
             in return $ devtype == ("filesystem" :: String)
 
@@ -234,12 +249,17 @@ signalDispatcher rtype bname sig = runTrigger rtype obj
 -- Extracts trigger actions and executes them sequentially if device is not internal
 runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
 runTrigger rtype obj = do
+    logOk $ "Signal caught on trigger " ++ show rtype ++ ":\n\t" ++ show obj
     -- Exit if device is internal - we do not have to act on such devices
     internal <- isDeviceInternal obj
+    logOk $ "Is device internal: " ++ show internal
     when (not internal) $ do
         -- Exit if device is not filesystem
         filesystem <- isDeviceFilesystem obj
+        logOk $ "Is device filesystem: " ++ show filesystem
         when filesystem $ do
+            when (rtype == "mounted") $ threadDelay 1000000
+            logOk $ "Running trigger actions..."
             let mctas = getTrigger (uConfig ?st) rtype
             case mctas of
                 Nothing -> logTriggerError rtype
@@ -285,6 +305,8 @@ getDeviceInfo obj = do
                                  , diDeviceFile = "<unknown>"
                                  , diMountPoint = Just "<unknown>"
                                  , diLabel = "<unknown>"
+                                 , diInternal = False
+                                 , diFSystem = False
                                  }
                 -- Ok, delete device from cache, because the only reason to cache access
                 -- is device removal
@@ -295,14 +317,16 @@ getDeviceInfo obj = do
                         writeTVar (uDevices ?st) $ M.delete (B.unpack $ strObjectPath obj) devs
                     return d
 
-        -- Request successful, using in
+        -- Request successful, using it
         Just props -> do
             -- Retrieve needed properties
-            let dobjpath = B.unpack $ strObjectPath obj  -- Object path is known
-            let ddevfile = M.lookup "DeviceFile" props
-            let dmounted = M.lookup "DeviceIsMounted" props
-            let dmpaths  = M.lookup "DeviceMountPaths" props
-            let dlabel   = M.lookup "IdLabel" props
+            let dobjpath  = B.unpack $ strObjectPath obj  -- Object path is known
+            let ddevfile  = M.lookup "DeviceFile" props
+            let dmounted  = M.lookup "DeviceIsMounted" props
+            let dmpaths   = M.lookup "DeviceMountPaths" props
+            let dlabel    = M.lookup "IdLabel" props
+            let dinternal = M.lookup "DeviceIsSystemInternal" props
+            let dusage    = M.lookup "IdUsage" props
             -- Build DeviceInfo structure
             let dinfo =  DInfo { diObjectPath = dobjpath
                                , diDeviceFile = fromJust $
@@ -314,8 +338,11 @@ getDeviceInfo obj = do
                                                      return . head
                                                 else Nothing
                                , diLabel = fromJust $ maybe (Just "<unknown>") fromVariant dlabel
+                               , diInternal = fromJust $ maybe (Just False) fromVariant dinternal
+                               , diFSystem = ("filesystem" :: String) ==
+                                             (fromJust $ maybe (Just "") fromVariant dusage)
                                }
-            atomically $ do
+            atomically $ do  -- Save device info to cache
                 devs <- readTVar (uDevices ?st)
                 writeTVar (uDevices ?st) $ M.insert dobjpath dinfo devs
             -- Return data

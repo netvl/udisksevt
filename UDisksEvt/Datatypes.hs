@@ -49,6 +49,8 @@ data DeviceInfo = DInfo { diObjectPath :: String
                         , diDeviceFile :: String
                         , diMountPoint :: Maybe String
                         , diLabel      :: String
+                        , diInternal   :: Bool
+                        , diFSystem    :: Bool
                         } deriving (Show)
 
 -- Global state datatype
