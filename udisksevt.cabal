@@ -14,5 +14,5 @@ Executable udisksevt
                    base>=4.2, text, mtl, containers, stm, process,
                    unix
     Main-Is: Main.hs
-    Other-Modules: UDisks, Config, Datatypes
+    Other-Modules: UDisksEvt.UDisks, UDisksEvt.Config, UDisksEvt.Datatypes
     Extensions: OverloadedStrings, TupleSections, ImplicitParams
