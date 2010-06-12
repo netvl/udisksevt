@@ -21,7 +21,7 @@ udisksevt-direct: $(FILES)
 	ghc $(GHCFLAGS) --make Main.hs -o $(BINNAME)
 
 configure:
-	runhaskell Setup.hs configure --user
+	runhaskell Setup.hs configure
 
 udisksevt: $(FILES)
 	runhaskell Setup.hs build

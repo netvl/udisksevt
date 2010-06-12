@@ -4,8 +4,9 @@
 
 module UDisksEvt.Datatypes where
 
-import Data.Map
-import Control.Concurrent.STM
+import Data.Map (Map)
+import Control.Concurrent.STM (TVar)
+import Text.ParserCombinators.Parsec (GenParser)
 
 -- Main configuration datatype
 data Configuration = C { cVars     :: Map String ConfigVarValue
@@ -36,13 +37,13 @@ data NotificationUrgency = NULow
                          | NUCritical
                          deriving (Show)
 
--- Intermediate structure used in config parsing
-data ConfigLine = CLVar String ConfigVarValue
-                | CLTrigger String
-                | CLTriggerAction ConfigTriggerAction
-                | CLEmpty
-                | CLComment
-                deriving (Show)
+-- State type used in parsing
+data ConfParserState = CPS { cpsCurrentTrigger :: Maybe String
+                           , cpsConfiguration :: Configuration
+                           }
+
+-- Custom parser type with state
+type ConfParser a = GenParser Char ConfParserState a
 
 -- Device information structure, used for caching
 data DeviceInfo = DInfo { diObjectPath :: String
