@@ -6,7 +6,7 @@
 FILES=$(shell find -type f -iname '*.hs')
 # Binary output directory
 OUTDIR=out
-# Name of ipupdd binary
+# Name of udisksevt binary for direct build
 BINNAME=$(OUTDIR)/udisksevt
 # Additional GHC flags
 GHCFLAGS=-XTupleSection -XOverloadedStrings
@@ -16,13 +16,15 @@ GHCFLAGS=-XTupleSection -XOverloadedStrings
 # Main rule
 all: udisksevt
 
-# Rule for updater project
+# Rule for direct build, i.e. without cabal
 udisksevt-direct: $(FILES)
 	ghc $(GHCFLAGS) --make Main.hs -o $(BINNAME)
 
+# Configure cabal project
 configure:
 	runhaskell Setup.hs configure
 
+# Build cabal project
 udisksevt: $(FILES)
 	runhaskell Setup.hs build
 
@@ -33,6 +35,6 @@ clean:
 	rm -rf dist
 	rm -f *~
 
-# Clean rule for output directory
+# Clean rule for output directory for direct build
 outclean:
-	rm -rf $(OUTDIR)/*
+	rm -rf $(OUTDIR)

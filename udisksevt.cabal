@@ -5,7 +5,7 @@ Build-Type: Simple
 License: GPL-2
 License-File: LICENSE
 Author: DPX-Infinity
-Homepage: http://dpx-infinity.vfose.ru/
+Homepage: http://github.com/dpx-infinity/udisksevt/
 Synopsis: UDisks helper program - events monitor
 
 Executable udisksevt
