@@ -7,10 +7,9 @@ module UDisksEvt.Config ( readConfiguration
                         , getTrigger
                         ) where
 
-import Control.Monad.State
 import Data.Maybe
 import System.IO
-import Text.ParserCombinators.Parsec hiding (spaces, State)
+import Text.ParserCombinators.Parsec hiding (spaces)
 import qualified Data.Map as M
 
 import UDisksEvt.Datatypes
@@ -59,15 +58,15 @@ commentLine = char '#' >> many (noneOf "\r\n") >> return ()
 -- File line with data
 fileLine :: ConfParser ()
 fileLine = (configVar <|>
-           configTrigger <|>
-           configTriggerActionShellCommand <|>
-           configTriggerActionNotification) >>
+            configTrigger <|>
+            configTriggerActionShellCommand <|>
+            configTriggerActionNotification) >>
            many spaces >> return ()
 
 -- Configuration variable
 configVar :: ConfParser ()
 configVar = do
-    string "set" >> many spaces
+    string "set" >> many1 spaces
     cvname <- many1 (alphaNum <|> char '-')
     many spaces >> char '=' >> many spaces
     cvvalue <- configVarString <|> configVarInt <|> configVarBool
@@ -78,7 +77,7 @@ configVar = do
 -- Configuration trigger
 configTrigger :: ConfParser ()
 configTrigger = do
-    string "on" >> many spaces
+    string "on" >> many1 spaces
     ctname <- many1 letter
     many spaces >> char ':'
     updateState (\st -> st { cpsCurrentTrigger = Just ctname })
@@ -86,35 +85,34 @@ configTrigger = do
 -- Config trigger action - shell command
 configTriggerActionShellCommand :: ConfParser ()
 configTriggerActionShellCommand = do
-    string "run" >> many spaces
+    string "run" >> many1 spaces
     cmd <- many1 (noneOf "\r\n")
     insertTriggerAction "run" (CTAShellCommand cmd)
 
 -- Config trigger action - notification
 configTriggerActionNotification :: ConfParser ()
 configTriggerActionNotification = do
-    string "notify"
-    many spaces
+    string "notify" >> many1 spaces
     nbody <- quoted mstring1
     -- This complicated structure parses 4 optional parameters of different types
     -- I have a feeling that this can be done more easily
     (nsummary, nicon, ntimeout, nurgency) <- do
-        many spaces
+        many1 spaces
         nsummary' <- optionMaybe (quoted mstring)
         case nsummary' of
             Nothing -> return ("", "default", -1, NUNormal)
             Just nsummary -> do
-                many spaces
+                many1 spaces
                 nicon' <- optionMaybe (quoted mstring)
                 case nicon' of
                     Nothing -> return (nsummary, "default", -1, NUNormal)
                     Just nicon -> do
-                        many spaces
+                        many1 spaces
                         ntimeout' <- optionMaybe number
                         case ntimeout' of
                             Nothing -> return (nsummary, nicon, -1, NUNormal)
                             Just ntimeout -> do
-                                many spaces
+                                many1 spaces
                                 nurgency' <- optionMaybe (string "low" <|>
                                                           string "normal" <|>
                                                           string "critical")

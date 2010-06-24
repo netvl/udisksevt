@@ -31,6 +31,7 @@ table = [ Option ['c'] ["config"] (ReqArg ConfigFile "FILE")
 configPath :: IO String
 configPath = getEnv "HOME" >>= return . (++"/.config/udisksevt/udisksevt.conf")
 
+-- Parse command line arguments
 parseArgs :: [String] -> IO (String, Bool)
 parseArgs argv = case getOpt Permute table argv of
     (opts, _, []) -> do
