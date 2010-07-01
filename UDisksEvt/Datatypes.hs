@@ -1,5 +1,5 @@
 -- udisksevt source file
--- Copyright (C) DPX-Infinity, 2010
+-- Copyright (C) Vladimir Matveev, 2010
 -- Datatypes collection module
 
 module UDisksEvt.Datatypes where
@@ -36,6 +36,14 @@ data NotificationUrgency = NULow
                          | NUNormal
                          | NUCritical
                          deriving (Show)
+
+instance Read NotificationUrgency where
+    readsPrec _ = readUrgency
+        where
+            readUrgency "low" = [(NULow, "")]
+            readUrgency "normal" = [(NUNormal, "")]
+            readUrgency "critical" = [(NUCritical, "")]
+            readUrgency u = error ("Incorrect urgency level: " ++ u)
 
 -- State type used in parsing
 data ConfParserState = CPS { cpsCurrentTrigger :: Maybe String

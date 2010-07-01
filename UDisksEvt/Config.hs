@@ -1,5 +1,5 @@
 -- udisksevt source file
--- Copyright (C) DPX-Infinity, 2010
+-- Copyright (C) Vladimir Matveev, 2010
 -- Configuration module
 
 module UDisksEvt.Config ( readConfiguration
@@ -7,6 +7,7 @@ module UDisksEvt.Config ( readConfiguration
                         , getTrigger
                         ) where
 
+import Control.Monad
 import Data.Maybe
 import System.IO
 import Text.ParserCombinators.Parsec hiding (spaces)
@@ -42,6 +43,7 @@ readConfiguration fname = do
             return defaultConfig
         Right conf -> return conf
     
+
 -- Main parser - while as whole
 fileData :: ConfParser Configuration
 fileData = (many spaces >> (commentLine <|> fileLine <|> emptyLine)) `sepEndBy` newline >>
@@ -70,9 +72,7 @@ configVar = do
     cvname <- many1 (alphaNum <|> char '-')
     many spaces >> char '=' >> many spaces
     cvvalue <- configVarString <|> configVarInt <|> configVarBool
-    st@(CPS { cpsConfiguration = conf }) <- getState
-    setState $  -- Set variable
-        st { cpsConfiguration = conf { cVars = M.insert cvname cvvalue (cVars conf) } }
+    setVariable cvname cvvalue
 
 -- Configuration trigger
 configTrigger :: ConfParser ()
@@ -80,7 +80,7 @@ configTrigger = do
     string "on" >> many1 spaces
     ctname <- many1 letter
     many spaces >> char ':'
-    updateState (\st -> st { cpsCurrentTrigger = Just ctname })
+    beginTrigger ctname
 
 -- Config trigger action - shell command
 configTriggerActionShellCommand :: ConfParser ()
@@ -118,32 +118,45 @@ configTriggerActionNotification = do
                                                           string "critical")
                                 case nurgency' of
                                     Nothing -> return (nsummary, nicon, ntimeout, NUNormal)
-                                    Just nurgency -> return (nsummary, nicon, ntimeout, NUNormal)
+                                    Just nurgency -> return (nsummary, nicon, ntimeout, read nurgency)
     insertTriggerAction "notify" (CTANotification nbody nsummary nicon ntimeout nurgency)
+
+-- Set variable in parser state
+setVariable :: String -> ConfigVarValue -> ConfParser ()
+setVariable cvname cvvalue =
+    updateState $ \st@(CPS { cpsConfiguration = conf }) ->
+    st { cpsConfiguration = conf { cVars = M.insert cvname cvvalue (cVars conf) } }
+
+-- Begin new trigger section
+beginTrigger :: String -> ConfParser ()
+beginTrigger ctname =
+    updateState $ \st -> st { cpsCurrentTrigger = Just ctname }
 
 -- Insert trigger action into parsing state
 insertTriggerAction :: String -> ConfigTriggerAction -> ConfParser ()
 insertTriggerAction tn cta = do
     st <- getState
-    when (isNothing $ cpsCurrentTrigger st) $ fail $ "unexpected " ++ tn ++ " action"
+    when (isNothing $ cpsCurrentTrigger st) $
+        fail ("unexpected " ++ tn ++ " action")
     let conf = cpsConfiguration st
         Just ct = cpsCurrentTrigger st
     setState $
-        st { cpsConfiguration = conf { cTriggers = M.insertWith (flip (++)) ct
+        st { cpsConfiguration = conf { cTriggers = M.insertWith (flip (++))
+                                                   ct
                                                    [cta]
                                                    (cTriggers conf) } }
 
 -- Config variable string value
 configVarString :: ConfParser ConfigVarValue
-configVarString = quoted mstring >>= return . CVString
+configVarString = fmap CVString (quoted mstring)
 
 -- Config variable integer value
 configVarInt :: ConfParser ConfigVarValue
-configVarInt = signed number >>= return . CVInt
+configVarInt = fmap CVInt (signed number)
 
 -- Config variable boolean value
 configVarBool :: ConfParser ConfigVarValue
-configVarBool = (string "yes" <|> string "no") >>= return . CVBool . readBool
+configVarBool = fmap (CVBool . readBool) (string "yes" <|> string "no")
     where
         readBool "yes" = True
         readBool "no"  = False
@@ -163,7 +176,7 @@ mstring1 = many1 (noneOf "\"\r\n")
 
 -- Just sequence of digits
 number :: ConfParser Int
-number = many1 digit >>= return . read
+number = fmap read (many1 digit)
 
 -- Signed integer
 signed :: ConfParser Int -> ConfParser Int
@@ -171,7 +184,7 @@ signed p = do
     sgn <- option '+' (char '-' <|> char '+')
     case sgn of
         '+' -> p
-        '-' -> p >>= return . negate
+        '-' -> fmap negate p
 
 -- Redefinition of the same parser in library;
 -- we don't need newline and such thing as spaces

@@ -1,5 +1,5 @@
 -- udisksevt source file
--- Copyright (C) DPX-Infinity, 2010
+-- Copyright (C) Vladimir Matveev, 2010
 -- Main module
 
 module Main where
@@ -29,7 +29,7 @@ table = [ Option ['c'] ["config"] (ReqArg ConfigFile "FILE")
 
 -- Default configuration location
 configPath :: IO String
-configPath = getEnv "HOME" >>= return . (++"/.config/udisksevt/udisksevt.conf")
+configPath = fmap (++ "/.config/udisksevt/udisksevt.conf") (getEnv "HOME")
 
 -- Parse command line arguments
 parseArgs :: [String] -> IO (String, Bool)

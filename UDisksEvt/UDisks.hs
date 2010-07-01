@@ -1,5 +1,5 @@
 -- udisksevt source file
--- Copyright (C) DPX-Infinity, 2010
+-- Copyright (C) Vladimir Matveev, 2010
 -- Module for communicating with UDisks through D-Bus
 
 module UDisksEvt.UDisks ( wakeDaemon
@@ -183,7 +183,7 @@ isDeviceInternal obj = do
                 Nothing -> return False
                 Just d -> return $ diInternal d
         Right resp ->  -- Ok, get actual value
-            let Just isinternal = fromVariant =<< (fromVariant $ head $ messageBody resp)
+            let Just isinternal = fromVariant =<< fromVariant (head $ messageBody resp)
             in return isinternal
 
 -- Checks is device is mountable filesystem
@@ -199,14 +199,14 @@ isDeviceFilesystem obj = do
                 Nothing -> return False
                 Just d -> return $ diFSystem d
         Right resp ->  -- Ok, get actual value
-            let Just devtype = fromVariant =<< (fromVariant $ head $ messageBody resp)
+            let Just devtype = fromVariant =<< fromVariant (head $ messageBody resp)
             in return $ devtype == ("filesystem" :: String)
 
 -- http://bluebones.net/2007/01/replace-in-haskell/ - Joseph's function
 replace :: (Eq a) => [a] -> [a] -> [a] -> [a]
 replace [] _ list = list
 replace oldSub newSub list = _replace list where
-	_replace list@(h:ts) = if isPrefixOf oldSub list
+	_replace list@(h:ts) = if oldSub `isPrefixOf` list
 		then newSub ++ _replace (drop len list)
 		else h : _replace ts
 	_replace [] = []
@@ -253,7 +253,7 @@ runTrigger rtype obj = do
     -- Exit if device is internal - we do not have to act on such devices
     internal <- isDeviceInternal obj
     logOk $ "Is device internal: " ++ show internal
-    when (not internal) $ do
+    unless internal $ do
         -- Exit if device is not filesystem
         filesystem <- isDeviceFilesystem obj
         logOk $ "Is device filesystem: " ++ show filesystem
@@ -340,7 +340,7 @@ getDeviceInfo obj = do
                                , diLabel = fromJust $ maybe (Just "<unknown>") fromVariant dlabel
                                , diInternal = fromJust $ maybe (Just False) fromVariant dinternal
                                , diFSystem = ("filesystem" :: String) ==
-                                             (fromJust $ maybe (Just "") fromVariant dusage)
+                                             fromJust (maybe (Just "") fromVariant dusage)
                                }
             atomically $ do  -- Save device info to cache
                 devs <- readTVar (uDevices ?st)
