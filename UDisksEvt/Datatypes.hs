@@ -5,6 +5,7 @@
 module UDisksEvt.Datatypes where
 
 import Data.Map (Map)
+import DBus.Types
 import Control.Concurrent.STM (TVar)
 import Text.ParserCombinators.Parsec (GenParser)
 
@@ -56,10 +57,7 @@ type ConfParser a = GenParser Char ConfParserState a
 -- Device information structure, used for caching
 data DeviceInfo = DInfo { diObjectPath :: String
                         , diDeviceFile :: String
-                        , diMountPoint :: Maybe String
-                        , diLabel      :: String
-                        , diInternal   :: Bool
-                        , diFSystem    :: Bool
+                        , diProperties :: Map String Variant
                         } deriving (Show)
 
 -- Global state datatype

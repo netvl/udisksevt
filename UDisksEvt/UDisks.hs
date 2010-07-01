@@ -1,7 +1,6 @@
 -- udisksevt source file
 -- Copyright (C) Vladimir Matveev, 2010
--- Module for communicating with UDisks through D-Bus
-
+-- Interaction with UDisks daemon signals
 module UDisksEvt.UDisks ( wakeDaemon
                         , runSignalHandlers
                         ) where
@@ -25,110 +24,30 @@ import System.Environment
 import System.Process
 
 import UDisksEvt.Config
+import UDisksEvt.DBus
 import UDisksEvt.Datatypes
+import UDisksEvt.Disk
+import UDisksEvt.Log
 
 -- Triggers - match rules mapping
-triggers = [ ("added", MatchRule { matchType = Just MR.Signal
-                                 , matchSender = Nothing
-                                 , matchDestination = Nothing
-                                 , matchPath = Just "/org/freedesktop/UDisks"
-                                 , matchInterface = Just "org.freedesktop.UDisks"
-                                 , matchMember = Just "DeviceAdded"
-                                 , matchParameters = []
-                                 })
-           , ("removed", MatchRule { matchType = Just MR.Signal
-                                   , matchSender = Nothing
-                                   , matchDestination = Nothing
-                                   , matchPath = Just "/org/freedesktop/UDisks"
-                                   , matchInterface = Just "org.freedesktop.UDisks"
-                                   , matchMember = Just "DeviceRemoved"
-                                   , matchParameters = []
-                                   })
-           , ("mounted", MatchRule { matchType = Just MR.Signal
-                                   , matchSender = Nothing
-                                   , matchDestination = Nothing
-                                   , matchPath = Just "/org/freedesktop/UDisks"
-                                   , matchInterface = Just "org.freedesktop.UDisks"
-                                   , matchMember = Just "DeviceJobChanged"
-                                   , matchParameters =
-                                       [StringValue 2 "FilesystemMount"]
-                                   })
-           , ("unmounted", MatchRule { matchType = Just MR.Signal
-                                     , matchSender = Nothing
-                                     , matchDestination = Nothing
-                                     , matchPath = Just "/org/freedesktop/UDisks"
-                                     , matchInterface = Just "org.freedesktop.UDisks"
-                                     , matchMember = Just "DeviceJobChanged"
-                                     , matchParameters =
-                                         [StringValue 2 "FilesystemUnmount"]
-                                     })
-           ]
-
--- Proxy for /org/freedesktop/UDisks object
-udisksProxy = Proxy (RemoteObject "org.freedesktop.UDisks" "/org/freedesktop/UDisks")
-              "org.freedesktop.UDisks"
-
--- Proxy for arbitrary device for device methods
-deviceProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
-                  "org.freedesktop.UDisks.Device"
-
--- Proxy for arbitrary device for device properties
-devicePropertyProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
-                         "org.freedesktop.DBus.Properties"
-
--- Notification daemon proxy
-notificationProxy =
-    Proxy (RemoteObject "org.freedesktop.Notifications" "/org/freedesktop/Notifications")
-    "org.freedesktop.Notifications"
-
--- Get system bus Client object
-systemBusClient = mkClient =<< getSystemBus
-
--- Get session bus Client object
-sessionBusClient = mkClient =<< getSessionBus
-
--- Print simple log message; now using only stdout
-logOk :: String -> IO ()
-logOk = putStrLn
-
--- Print error message; now using only stderr
-logError :: String -> IO ()
-logError = hPutStrLn stderr
-
--- Log DBus error; now used only in daemon startup routine
-logDBusError :: Error -> IO ()
-logDBusError err = logError $ "Coulnd't startup UDisks daemon:\n\t" ++ show err
-
--- Log UDisks daemon startup
-logDaemonStartup :: MethodReturn -> IO ()
-logDaemonStartup _ = logOk $ "UDisks daemon successfully started!"
-
--- Trying to launch an unspecified trigger
-logTriggerError :: String -> IO ()
-logTriggerError rtype = logError $ "Trying to launch trigger undefined in configuration;" ++ 
-                  "it's safe do this if you don't need any actions:\n\t" ++ show rtype
-
--- Can't get device info neither from UDisks nor from cache
-logDeviceInfoError :: ObjectPath -> IO ()
-logDeviceInfoError obj = logError $
-    "Cannot get device info: it's not in UDisks database nor in device cache:\n\t" ++ show obj
-
--- Log command running
-logRunningCommand :: String -> IO ()
-logRunningCommand cmd = logOk $ "Running command:\n\t" ++ show cmd
-
--- Print that there was an error with notification sending
-logNotifyError :: String -> String -> Error -> IO ()
-logNotifyError summary body err = do
-    let errname = B.unpack $ strErrorName $ errorName err
-    logError $ "Error sending notification: " ++ errname ++
-        ":\n\t" ++ show summary ++ " " ++ show body
-
--- Print that notification sending was ok
-logNotifyOk :: String -> String -> String -> MethodReturn -> IO ()
-logNotifyOk summary body icon _ =
-    logOk $ "Successfully sent notification:\n\t" ++ show summary ++ " " ++ show body ++ 
-    " " ++ show icon
+triggers :: [(String, MatchRule)]
+triggers = map f $ [ ("added", "DeviceAdded", [])
+                   , ("removed", "DeviceRemoved", [])
+                   , ("mounted", "DeviceJobChanged",
+                      [StringValue 2 "FilesystemMount"])
+                   , ("unmounted", "DeviceJobChanged",
+                      [StringValue 2 "FilesystemUnmount"])
+                   ]
+    where
+        f (tn, mm, mp) =
+            (tn, MatchRule { matchType = Just MR.Signal
+                           , matchSender = Nothing
+                           , matchDestination = Nothing
+                           , matchPath = Just "/org/freedesktop/UDisks"
+                           , matchInterface = Just "org.freedesktop.UDisks"
+                           , matchMember = Just mm
+                           , matchParameters = mp
+                           })
 
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
@@ -138,95 +57,7 @@ runShell cmd = do
     logRunningCommand shcmd
     runCommand shcmd
     return ()
-
--- Show notification using D-Bus org.freedesktop.Notifications server, if present
-showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency
-                    -> IO ()
-showNotification body summary icon timeout urgency = do
-    client <- sessionBusClient
-    let actions = fromJust $ toArray DBusString ([] :: [String])
-    let nurgency = case urgency of
-            NULow -> 0 :: Word8
-            NUNormal -> 1
-            NUCritical -> 2
-    let hints = fromJust $
-                dictionaryFromItems DBusString DBusVariant
-                    [(toVariant ("urgency" :: String), toVariant $ toVariant nurgency)]
-    homepath <- getEnv "HOME"
-    let CVString ricon = if icon /= "default"
-                         then CVString icon
-                         else fromJust $ M.lookup "default-notification-icon" $ cVars $
-                              uConfig ?st
-    let ricon' = replace "$HOME$" homepath ricon
-    callProxy client notificationProxy "Notify" [] [ toVariant ("UDisksEvt" :: String)
-                                                   , toVariant (0 :: Word32)
-                                                   , toVariant ricon'
-                                                   , toVariant summary
-                                                   , toVariant body
-                                                   , toVariant actions
-                                                   , toVariant hints
-                                                   , toVariant (fromIntegral timeout :: Int32)
-                                                   ]
-        (logNotifyError summary body) (logNotifyOk summary body ricon')
-    return ()
-
--- Checks if device is system internal
-isDeviceInternal :: (?st :: UState) => ObjectPath -> IO Bool
-isDeviceInternal obj = do
-    client <- systemBusClient
-    response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
-        map toVariant (["org.freedesktop.UDisks.Device", "DeviceIsSystemInternal"] :: [String])
-    case response of
-        Left _ -> do  -- Error, trying to get value from cache
-            dev <- getCachedDeviceInfo obj
-            case dev of
-                Nothing -> return False
-                Just d -> return $ diInternal d
-        Right resp ->  -- Ok, get actual value
-            let Just isinternal = fromVariant =<< fromVariant (head $ messageBody resp)
-            in return isinternal
-
--- Checks is device is mountable filesystem
-isDeviceFilesystem :: (?st :: UState) => ObjectPath -> IO Bool
-isDeviceFilesystem obj = do
-    client <- systemBusClient
-    response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
-        map toVariant (["org.freedesktop.UDisks.Device", "IdUsage"] :: [String])
-    case response of
-        Left _ -> do  -- Error, trying to get value from cache
-            dev <- getCachedDeviceInfo obj
-            case dev of
-                Nothing -> return False
-                Just d -> return $ diFSystem d
-        Right resp ->  -- Ok, get actual value
-            let Just devtype = fromVariant =<< fromVariant (head $ messageBody resp)
-            in return $ devtype == ("filesystem" :: String)
-
--- http://bluebones.net/2007/01/replace-in-haskell/ - Joseph's function
-replace :: (Eq a) => [a] -> [a] -> [a] -> [a]
-replace [] _ list = list
-replace oldSub newSub list = _replace list where
-	_replace list@(h:ts) = if oldSub `isPrefixOf` list
-		then newSub ++ _replace (drop len list)
-		else h : _replace ts
-	_replace [] = []
-	len = length oldSub
         
--- Wake UDisks daemon with a request
-wakeDaemon :: IO ()
-wakeDaemon = do
-    client <- systemBusClient
-    callProxy client udisksProxy "EnumerateDevices" [] [] logDBusError logDaemonStartup
-
-enumerateDevices :: IO [String]
-enumerateDevices = do
-    client <- systemBusClient
-    let proxy = udisksProxy
-    response <- callProxyBlocking_ client udisksProxy "EnumerateDevices" [] []
-    let rdata = head $ messageBody response
-    let Just lst1 = fromArray =<< fromVariant rdata
-    return $ map (B.unpack . strObjectPath) lst1
-
 -- Set up UDisks signals handlers
 runSignalHandlers :: Configuration -> IO ()
 runSignalHandlers conf = do
@@ -242,7 +73,7 @@ runSignalHandlers conf = do
 
 -- Runs trigger on signal
 signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
-signalDispatcher rtype bname sig = runTrigger rtype obj
+signalDispatcher rtype _ sig = runTrigger rtype obj
     where
         obj = fromJust $ fromVariant $ head $ signalBody sig
 
@@ -258,8 +89,12 @@ runTrigger rtype obj = do
         filesystem <- isDeviceFilesystem obj
         logOk $ "Is device filesystem: " ++ show filesystem
         when filesystem $ do
+            -- Necessary delay - otherwise the device isn't mounted properly
+            -- before retrieving its properties, resulting in an inability
+            -- to get mount point
             when (rtype == "mounted") $ threadDelay 1000000
             logOk $ "Running trigger actions..."
+            -- Get trigger actions
             let mctas = getTrigger (uConfig ?st) rtype
             case mctas of
                 Nothing -> logTriggerError rtype
@@ -277,88 +112,63 @@ executeTriggerAction obj cta = do
             showNotification (substituteParameters dev nbody) (substituteParameters dev nsummary)
                 nicon ntimeout nurgency
 
--- Retrieve device info, either from UDisks or from cache if the latest is unavailable
--- It returns something even if info is missing from cache, though logs an error then
+-- Retrieve device info, either from UDisks or from cache if the former is unavailable
+-- It returns something even if info is missing from cache, but logs an error then
+-- If info was retrieved from UDisks, add it to cache
 getDeviceInfo :: (?st :: UState) => ObjectPath -> IO DeviceInfo
 getDeviceInfo obj = do
-    client <- systemBusClient
-    -- Get all properties of device
-    -- There is *many* of them
-    response <- callProxyBlocking client (devicePropertyProxy obj) "GetAll" []
-                [toVariant ("org.freedesktop.UDisks.Device" :: String)]
-    mprops <- case response of
-        -- If request failed (e.g. in case of detached device), try to get info from cache
-        Left _ -> return Nothing
-        -- Request is successful, trying to retrieve properties map
-        Right resp -> let rdata = head $ messageBody resp
-                      in return (fromDictionary =<< fromVariant rdata)
-    -- Type definition is necessary, won't compile otherwise
-    case (mprops :: Maybe (M.Map String Variant)) of
-        Nothing -> do  -- Request failed, trying to use cache
-            dev <- getCachedDeviceInfo obj
-            case dev of
-                -- Device isn't in the cache, which is strange
-                -- Log it and return some default values
-                Nothing -> do
-                    logDeviceInfoError obj
-                    return DInfo { diObjectPath = B.unpack $ strObjectPath obj
-                                 , diDeviceFile = "<unknown>"
-                                 , diMountPoint = Just "<unknown>"
-                                 , diLabel = "<unknown>"
-                                 , diInternal = False
-                                 , diFSystem = False
-                                 }
-                -- Ok, delete device from cache, because the only reason to cache access
-                -- is device removal
-                -- Return device info then
-                Just d -> do
-                    atomically $ do
-                        devs <- readTVar (uDevices ?st)
-                        writeTVar (uDevices ?st) $ M.delete (B.unpack $ strObjectPath obj) devs
-                    return d
-
-        -- Request successful, using it
-        Just props -> do
-            -- Retrieve needed properties
-            let dobjpath  = B.unpack $ strObjectPath obj  -- Object path is known
-            let ddevfile  = M.lookup "DeviceFile" props
-            let dmounted  = M.lookup "DeviceIsMounted" props
-            let dmpaths   = M.lookup "DeviceMountPaths" props
-            let dlabel    = M.lookup "IdLabel" props
-            let dinternal = M.lookup "DeviceIsSystemInternal" props
-            let dusage    = M.lookup "IdUsage" props
-            -- Build DeviceInfo structure
-            let dinfo =  DInfo { diObjectPath = dobjpath
-                               , diDeviceFile = fromJust $
-                                                maybe (Just "<unknown>") fromVariant ddevfile
-                               , diMountPoint = if fromJust $ fromVariant =<< dmounted
-                                                then dmpaths >>=
-                                                     fromVariant >>=
-                                                     fromArray >>=
-                                                     return . head
-                                                else Nothing
-                               , diLabel = fromJust $ maybe (Just "<unknown>") fromVariant dlabel
-                               , diInternal = fromJust $ maybe (Just False) fromVariant dinternal
-                               , diFSystem = ("filesystem" :: String) ==
-                                             fromJust (maybe (Just "") fromVariant dusage)
-                               }
-            atomically $ do  -- Save device info to cache
-                devs <- readTVar (uDevices ?st)
-                writeTVar (uDevices ?st) $ M.insert dobjpath dinfo devs
-            -- Return data
-            return dinfo
-
--- Get cached device information; this may fail
-getCachedDeviceInfo :: (?st :: UState) => ObjectPath -> IO (Maybe DeviceInfo)
-getCachedDeviceInfo obj = do
-    devs <- atomically $ readTVar (uDevices ?st)  -- Get cache map
-    return $ M.lookup (B.unpack $ strObjectPath obj) devs
-
+    (cached, mpm) <- getDevicePropertyMap obj
+    case cached of
+        -- Device cache was used
+        True -> case mpm of
+            -- Device isn't in the cache
+            -- Log it and return some defaults
+            Nothing -> do
+                logDeviceInfoError obj
+                -- Default properties
+                let pm = [ ("DeviceFile", toVariant ("<unknown>" :: String))
+                         , ("DeviceIsSystemInternal", toVariant False)
+                         , ("IdLabel", toVariant ("<unknown>" :: String))
+                         , ("IdUsage", toVariant ("" :: String))
+                         , ("DeviceIsMounted", toVariant False)
+                         , ("DeviceMountPaths", toVariant emptyArray)
+                         ]
+                    Just emptyArray = toArray DBusString ([] :: [String])
+                return DInfo { diObjectPath = objectPathToString obj
+                             , diDeviceFile = "<unknown>"
+                             , diProperties = M.fromList pm
+                             }
+            -- Ok, delete device info from cache and return it
+            Just pm -> do
+                Just di <- getDeviceInfoCached obj
+                atomically $ do
+                    devs <- readTVar (uDevices ?st)
+                    writeTVar (uDevices ?st) $
+                        M.delete (objectPathToString obj) devs
+                return di
+        -- Cache was not used, construct new device info structure
+        -- and add it to cache
+        False -> case mpm of
+            Nothing ->  -- This is impossible!
+                error "Suddenly couldn't get device information!"
+            Just pm -> do
+                let dobjpath = objectPathToString obj
+                    ddevfile = M.lookup "DeviceFile" pm >>= fromVariant
+                    dinfo = DInfo { diObjectPath = dobjpath
+                                  , diDeviceFile = fromJust $ ddevfile
+                                  , diProperties = pm
+                                  }
+                atomically $ do
+                    devs <- readTVar (uDevices ?st)
+                    writeTVar (uDevices ?st) $ M.insert dobjpath dinfo devs
+                -- Return device information
+                return dinfo
+                    
 -- Performs substring replace to transfer device information to shell commands/notifications
 substituteParameters :: (?st :: UState) => DeviceInfo -> String -> String
-substituteParameters dev = replace "$DEVICE$" (diDeviceFile dev) .
+substituteParameters dev = id {- replace "$DEVICE$" (diDeviceFile dev) .
                            maybe (replace "$MOUNTPATH$" "<not mounted>")
                                  (replace "$MOUNTPATH$") (diMountPoint dev) .
                            replace "$LABEL$" (diLabel dev) .
-                           replace "$OBJECTPATH$" (diObjectPath dev)
+                           replace "$OBJECTPATH$" (diObjectPath dev) -}
 

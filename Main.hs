@@ -18,10 +18,12 @@ import UDisksEvt.Config
 import UDisksEvt.Datatypes
 import UDisksEvt.UDisks
 
+-- Auxiliary datatype for command line options parsing
 data Flag = ConfigFile String  -- Configuration file argument
           | Daemonize          -- Daemonize flag
           deriving (Eq, Show)
 
+-- Table of options definitions
 table = [ Option ['c'] ["config"] (ReqArg ConfigFile "FILE")
           "configuration file; defaults to ~/.config/udisksevt/udisksevt.conf"
         , Option ['d'] ["daemonize"] (NoArg Daemonize) "daemonize, i.e. detach from console"
