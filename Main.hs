@@ -65,6 +65,7 @@ doDaemonize prog = do
     putStrLn "Forked to background."
     exitImmediately ExitSuccess
 
+-- Program entry point
 main :: IO ()
 main = do
     (confpath, daemonize) <- parseArgs =<< getArgs

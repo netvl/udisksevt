@@ -1,5 +1,5 @@
 -- udisksevt source file
--- Copyright (C) Vladimir Matveev, 2010m
+-- Copyright (C) Vladimir Matveev, 2010
 -- D-Bus interface to UDisks daemon
 module UDisksEvt.DBus where
 
@@ -104,11 +104,11 @@ getDeviceProperty obj pname = do
             case prop of
                 Nothing -> do
                     logError $ "Unable to retrieve property " ++ pname ++
-                        "of device " ++ show obj
+                        " of device " ++ show obj
                     return Nothing
                 jp -> return jp
         -- Ok, get response head, it's the value
-        Right r -> return $ listToMaybe $ messageBody r
+        Right r -> return $ fromVariant =<< listToMaybe (messageBody r)
 
 -- Retrieve all device properties as a Map either from UDisks or from cache
 -- Returns the device properties map and a boolean flag showing whether
@@ -119,13 +119,14 @@ getDevicePropertyMap obj = do
     response <- callProxyBlocking client (devicePropertyProxy obj) "GetAll" [] $
                 [toVariant ("org.freedesktop.UDisks.Device" :: String)]
     case response of
-        Left _ -> do  -- Error, trying to get cached map
+        Left e -> do  -- Error, trying to get cached map
+            logError $ "Unable to get property map from D-Bus: " ++ show e
             mpm <- getDevicePropertyMapCached obj :: IO (Maybe (M.Map String Variant))
             return (True, mpm)
         Right r -> do  -- Ok, extracting map from D-Bus dictionary
             let rh = head $ messageBody r
                 Just d = fromVariant rh
-                mpm = fromDictionary d -- :: Maybe (Map String Variant)
+                mpm = fromDictionary d
             return (False, mpm)
 
 -- Retrieve some device properties using it's property map in order to
@@ -143,7 +144,8 @@ getDeviceProperties obj pnames = do
 isDeviceInternal :: (?st :: UState) => ObjectPath -> IO Bool
 isDeviceInternal obj = do
     v <- getDeviceProperty obj "DeviceIsSystemInternal"
-    return $ case fromVariant =<< v of
+    let mp = v >>= fromVariant :: Maybe Bool
+    return $ case mp of
         Nothing -> False
         Just isinternal -> isinternal
 
@@ -152,6 +154,7 @@ isDeviceInternal obj = do
 isDeviceFilesystem :: (?st :: UState) => ObjectPath -> IO Bool
 isDeviceFilesystem obj = do
     v <- getDeviceProperty obj "IdUsage"
-    return $ case fromVariant =<< v of
+    let mp = v >>= fromVariant :: Maybe String
+    return $ case mp of
         Nothing -> False
         Just devtype -> devtype == ("filesystem" :: String)

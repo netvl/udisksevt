@@ -14,6 +14,7 @@ import Text.ParserCombinators.Parsec hiding (spaces)
 import qualified Data.Map as M
 
 import UDisksEvt.Datatypes
+import UDisksEvt.Log
 
 -- Default configuration
 defaultConfig :: Configuration
@@ -38,8 +39,8 @@ readConfiguration fname = do
     fdata <- readFile fname
     case runParser fileData (CPS Nothing defaultConfig) fname fdata of
         Left e -> do
-            hPutStrLn stderr $ "Error parsing config file " ++ fname ++ ": " ++ show e
-            hPutStrLn stderr $ "Dropping to default values."
+            logError $ "Error parsing config file:\n" ++ show e
+            logError $ "Dropping to default values."
             return defaultConfig
         Right conf -> return conf
     
@@ -97,22 +98,22 @@ configTriggerActionNotification = do
     -- This complicated structure parses 4 optional parameters of different types
     -- I have a feeling that this can be done more easily
     (nsummary, nicon, ntimeout, nurgency) <- do
-        many1 spaces
+        many spaces
         nsummary' <- optionMaybe (quoted mstring)
         case nsummary' of
             Nothing -> return ("", "default", -1, NUNormal)
             Just nsummary -> do
-                many1 spaces
+                many spaces
                 nicon' <- optionMaybe (quoted mstring)
                 case nicon' of
                     Nothing -> return (nsummary, "default", -1, NUNormal)
                     Just nicon -> do
-                        many1 spaces
+                        many spaces
                         ntimeout' <- optionMaybe number
                         case ntimeout' of
                             Nothing -> return (nsummary, nicon, -1, NUNormal)
                             Just ntimeout -> do
-                                many1 spaces
+                                many spaces
                                 nurgency' <- optionMaybe (string "low" <|>
                                                           string "normal" <|>
                                                           string "critical")

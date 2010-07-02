@@ -1,0 +1,158 @@
+=== UDisksEvt ===
+
+UDisksEvt is a daemon which listens for D-Bus signals emitted by UDisks daemon
+and execute configured actions, performing substitution of device properties
+when needed. So, it can be used e.g. for automounting removable devices or for
+notifications on device insertion/removal. The most convenient way to use
+UDisksEvt is in conjunction with traydevice program by Martin Špelina:
+http://bbs.archlinux.org/viewtopic.php?id=84792
+
+=== Requirements ===
+To build the program you need Glasgow Haskell Compiler at least 6.10 version and
+following haskell packages installed:
+    dbus-client >= 0.3
+    dbus-core >= 0.8
+    parsec >= 2.1 && < 3
+    text
+    mtl
+    containers
+    stm
+    process
+    unix
+However, they are not runtime dependencies; you can safely remove the whole
+system after the compilation. The binary itself depends only on gmp and pthread
+libraries, which should already be installed.
+
+=== Installation ===
+Ensure you have GHC and required libraries installed and execute following
+command in the main source directory (where Setup.hs is located):
+
+    $ runhaskell Setup.hs configure --prefix=/usr/local
+    $ runhaskell Setup.hs build
+    $ sudo runhaskell Setup.hs install
+
+The only binary should be now installed into the /usr/local/bin directory and
+LICENSE file should be installed into the /usr/local/share/udisksevt-$version
+directory.
+
+=== Usage ===
+You can start UDisksEvt either in daemon mode or plain mode. To start is as a
+daemon use and option '-d'. UDisksEvt will fork to background then. If you
+launch the program without this option, all output will be sent to your terminal
+(if any). This is useful for debugging.
+You can specify the configuration file to load using '-c' option. If it is not
+specified, the default of ~/.config/udisksevt/udisksevt.conf is used.
+
+=== Configuration ===
+First of all, there is an example config bundled in the package. There are many
+comments in there, and it should not be hard to change it according to your
+needs.
+
+Configuration file is simple. It consists of variable bindings and of
+arbitrarily many sections, though only four predefined ones are supported now.
+Each section contains arbitrarily many 'run' and 'notify' commands. The comments
+must begin with '#' sign and must be on their own lines; mixing them with config
+directives is not supported.
+
+Variable definition looks like this:
+
+    set <variable name> = <value>
+
+where <variable name> consists of alphanumeric characters and '-' sign.
+<value> can be quoted string (escaping characters currently is not supported),
+a possibly signed integer or a boolean in form 'yes'/'no'.
+Currently supported variables:
+
+    start-udisks-daemon :: Bool
+        -- if yes, UDisksEvt will start the UDisks daemon if it is not already
+           started by sending it a simple message.
+           Default yes
+    
+    shell-command :: String
+        -- this must be a full path to shell binary. The shell must accept '-c'
+           command line argument. This value is used in 'run' commands; in fact,
+           all contents of 'run' command argument is sent as value of '-c'
+           option to this program.
+           Default "/bin/bash"
+
+    default-notification-icon :: String
+        -- this must be a full path to the icon file which will be used if not
+           specified in 'notify' commands. This can be either icon file name
+           (should always work) or GTK stock name (depends on notification
+           daemon, e.g. Awesome WM doesn't support it, so this behaviour is
+           untested). You can use $HOME$ value inside this string; it is
+           expanded into full path to your home directory. This value can be
+           empty, indicating that there is no default icon.
+           Default ""
+
+
+Section definition looks like this:
+
+    on <trigger name>:
+
+<trigger name> must be one of 'added', 'mounted', 'unmounted', 'removed' without
+quotes. Other names can be used, but such sections will be ignored. These
+section names are self-explaining. Section definition ends with the beginning of
+another sections. Also, note the colon sign after trigger name. All triggers are
+executed only if device have UDisks property 'DeviceIsSystemInternal' set to
+false and if property 'IdUsage' is set to "filesystem" value. Send me a report
+if it is incorrect behaviour.
+
+Section configuration directives are 'run' and 'notify'. 
+
+Run command:
+
+    run <command>
+
+'run' action sends the rest of the line after the word 'run' to the shell
+specified by 'shell-command' config variable as the value of '-c' option.
+
+Notify command:
+
+    notify "Body" ["Summary" ["/icon/path" [timeout [urgency]]]]
+
+'notify' action uses the D-Bus to send a notification using the notification
+daemon. This daemon can be embedded in the window manager (like Awesome) or can
+be standalone program, like notify-osd in Gnome. All arguments except the first
+one are optional. "Body" is the main text of the notifcation. "Summary" is the
+caption. "/icon/path" is the path to icon. It can be a string "default" to use
+the value in 'default-notification-icon' config variable. timeout is an integer
+value specifying the notification timeout in milliseconds. 0 means indefinite
+time, -1 - notification server default. The last argument, urgency, can be one
+of three values: 'low', 'normal' or 'critical' without quotes. It sets the
+urgency level of notification. Note that you can use 'run' action with
+notify-send program in libnotify package to achieve same results, but 'notify'
+action have less overhead because the D-Bus interaction with notification 
+daemon is implemented in UDisksEvt internally and does not require launching
+another program.
+
+=== Substitution ===
+In 'run' command argument and in "Body" and "Summary" arguments of 'notify'
+command you can use "variables" in form "$Name$". These "variables" will be
+substituted by actual device properties retrieved from UDisks. Name is the name
+of the property; the list of these properties names and their descriptions is
+located on the http://hal.freedesktop.org/ site in UDisks documentation on
+org.freedesktop.UDisks.Device interface. They are of different types, but in the
+substitution they will be (hopefully) correctly converted to string
+representation. If it is an array, the first element will be retrieved. If it is
+a dictionary, the undefined (in fact, it depends on dbus-core haskell library)
+element will be retrieved. These are the most useful ones:
+
+    IdLabel           ---   device label; can be empty
+    IdUuid            ---   device unique identifier
+    DeviceFile        ---   system device file, like /dev/sda1
+    DeviceMountPaths  ---   device mount paths array; only the first path is
+                            retrieved
+
+So, using these "variables", you can send customized notifications and run
+commands with device properties arguments. For example, to launch a most recent
+version of traydevice program correctly and to receive a notification, you can
+use this section definition:
+
+     on added:
+          notify "Added device $DeviceFile$"
+          run traydevice "$DeviceFile"
+
+The example config file already contains appropriate directives to launch
+traydevice on device mount event.
+
