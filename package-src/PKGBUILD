@@ -11,19 +11,20 @@
 # and haskell-parsec.install file:
 #   HS_DIR=/usr/share/haskell/haskell-parsec -> HS_DIR=/usr/share/haskell/haskell-parsec3
 # Then install package as usual - makepkg && pacman -U haskell-parsec3-whatever.pkg.tar.xz
-# Now install haskell-dbus-core and haskell-dbus-client from AUR using your favourite
-# program. It will bring some other dependencies though, but you can safely uninstall them
-# after compiling, they are not run-time dependencies.
+# Now install haskell-dbus-core from AUR, modifying its PKGBUILD to depend on haskell-parsec3
+# instead of haskell-parsec>=3.0 first. Then install haskell-dbus-client using your favourite
+# program. DBus packages will bring some other dependencies though, but you can safely uninstall
+# them after compiling, they are not run-time dependencies.
 
 pkgname=udisksevt-git
 pkgver=20100612
-pkgrel=1
+pkgrel=2
 pkgdesc="UDisks events handler daemon"
 arch=('i686' 'x86_64')
 url="http://github.com/dpx-infinity/udisksevt/"
 license=('GPL')
 depends=('udisks' 'polkit' 'consolekit' 'dbus' 'gmp')
-makedepends=('git' 'ghc' 'haskell-dbus-core' 'haskell-dbus-client' 'haskell-text')
+makedepends=('git' 'ghc' 'haskell-dbus-core' 'haskell-dbus-client' 'haskell-text' 'haskell-stm')
 install="udisksevt.install"
 
 _gitroot="git://github.com/dpx-infinity/udisksevt.git"
