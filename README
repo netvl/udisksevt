@@ -42,6 +42,14 @@ launch the program without this option, all output will be sent to your terminal
 (if any). This is useful for debugging.
 You can specify the configuration file to load using '-c' option. If it is not
 specified, the default of ~/.config/udisksevt/udisksevt.conf is used.
+You have to launch D-Bus session and ConsoleKit session before udisksevt. If you
+use startx to launch X server, you can use the following snippet:
+
+    if which dbus-launch &>/dev/null && [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+        eval $(dbus-launch --sh-syntax --exit-with-session)
+    fi
+    udisksevt -d
+    ck-launch-session your_window_manager
 
 === Configuration ===
 First of all, there is an example config bundled in the package. There are many
