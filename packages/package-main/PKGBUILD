@@ -2,13 +2,13 @@
 #
 pkgname=udisksevt
 pkgver=1.0
-pkgrel=4
+pkgrel=5
 pkgdesc="UDisks events handler daemon"
 arch=('i686' 'x86_64')
 url="http://github.com/dpx-infinity/udisksevt/"
 license=('GPL')
 depends=('udisks' 'polkit' 'consolekit' 'dbus' 'gmp')
-makedepends=('ghc' 'haskell-dbus-core-parsec3' 'haskell-dbus-client' 'haskell-text' 'haskell-stm')
+makedepends=('ghc' 'haskell-dbus-core-parsec3' 'haskell-dbus-client-parsec3' 'haskell-text' 'haskell-stm')
 conflicts=('udisksevt-git')
 install=udisksevt.install
 
