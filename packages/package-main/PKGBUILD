@@ -1,14 +1,15 @@
 # Contributor: Vladimir Matveev <dpx.infinity at gmail point com>
 #
 pkgname=udisksevt
-pkgver=1.0
-pkgrel=5
+pkgver=1.1
+pkgrel=1
 pkgdesc="UDisks events handler daemon"
 arch=('i686' 'x86_64')
 url="http://github.com/dpx-infinity/udisksevt/"
 license=('GPL')
 depends=('udisks' 'polkit' 'consolekit' 'dbus' 'gmp')
-makedepends=('ghc' 'haskell-dbus-core-parsec3' 'haskell-dbus-client-parsec3' 'haskell-text' 'haskell-stm')
+makedepends=('ghc' 'haskell-dbus-core-parsec3' 'haskell-dbus-client-parsec3>=0.4' 
+             'haskell-text' 'haskell-stm' 'haskell-transformers' 'haskell-monads-tf')
 conflicts=('udisksevt-git')
 install=udisksevt.install
 

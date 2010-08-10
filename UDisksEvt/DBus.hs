@@ -4,6 +4,7 @@
 module UDisksEvt.DBus where
 
 import Control.Monad
+import Control.Monad.IO.Class
 import DBus.Bus
 import DBus.Client
 import DBus.Message
@@ -33,33 +34,30 @@ replace oldSub newSub list = _replace list where
 --- MOVE SOMEWHERE ---
 
 -- Proxy for /org/freedesktop/UDisks object
-udisksProxy = Proxy (RemoteObject "org.freedesktop.UDisks" "/org/freedesktop/UDisks")
-              "org.freedesktop.UDisks"
+udisksProxy = Proxy "org.freedesktop.UDisks" "/org/freedesktop/UDisks" "org.freedesktop.UDisks"
 
 -- Proxy for arbitrary device for device methods
-deviceProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
-                  "org.freedesktop.UDisks.Device"
+deviceProxy dev = Proxy "org.freedesktop.UDisks" dev "org.freedesktop.UDisks.Device"
 
 -- Proxy for arbitrary device for device properties
-devicePropertyProxy dev = Proxy (RemoteObject "org.freedesktop.UDisks" dev)
-                         "org.freedesktop.DBus.Properties"
+devicePropertyProxy dev = Proxy "org.freedesktop.UDisks" dev "org.freedesktop.DBus.Properties"
 
 -- Notification daemon proxy
-notificationProxy =
-    Proxy (RemoteObject "org.freedesktop.Notifications" "/org/freedesktop/Notifications")
-    "org.freedesktop.Notifications"
+notificationProxy = Proxy "org.freedesktop.Notifications" "/org/freedesktop/Notifications"
+                    "org.freedesktop.Notifications"
 
 -- Get system bus Client object
-systemBusClient = mkClient =<< getSystemBus
+systemBusClient = newClient =<< getSystemBus
 
 -- Get session bus Client object
-sessionBusClient = mkClient =<< getSessionBus
+sessionBusClient = newClient =<< getSessionBus
 
 -- Wake UDisks daemon with a request
 wakeDaemon :: IO ()
 wakeDaemon = do
     client <- systemBusClient
-    callProxy client udisksProxy "EnumerateDevices" [] [] logDBusError logDaemonStartup
+    runDBus client $ callProxy udisksProxy "EnumerateDevices" [] [] (liftIO . logDBusError)
+                                                                    (liftIO . logDaemonStartup)
 
 -- Show notification using D-Bus org.freedesktop.Notifications server, if present
 showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency -> IO ()
@@ -79,7 +77,7 @@ showNotification body summary icon timeout urgency = do
                          else fromJust $ M.lookup "default-notification-icon" $ cVars $
                               uConfig ?st
     let ricon' = replace "$HOME$" homepath ricon
-    callProxy client notificationProxy "Notify" []
+    runDBus client $ callProxy notificationProxy "Notify" []
         ([ toVariant ("UDisksEvt" :: String)
          , toVariant (0 :: Word32)
          , toVariant ricon'
@@ -89,14 +87,14 @@ showNotification body summary icon timeout urgency = do
          , toVariant hints
          , toVariant (fromIntegral timeout :: Int32)
          ])
-        (logNotifyError summary body) (logNotifyOk summary body ricon')
+        (liftIO . logNotifyError summary body) (liftIO . logNotifyOk summary body ricon')
     return ()
 
 -- Get device property either from UDisks or from device cache
 getDeviceProperty :: (?st :: UState) => ObjectPath -> String -> IO (Maybe Variant)
 getDeviceProperty obj pname = do
     client <- systemBusClient
-    response <- callProxyBlocking client (devicePropertyProxy obj) "Get" [] $
+    response <- runDBus client $ callProxyBlocking (devicePropertyProxy obj) "Get" [] $
                 map toVariant ["org.freedesktop.UDisks.Device", pname]
     case response of
         Left _ -> do  -- Error, trying to retrieve value from cache
@@ -116,7 +114,7 @@ getDeviceProperty obj pname = do
 getDevicePropertyMap :: (?st :: UState) => ObjectPath -> IO (Bool, Maybe (M.Map String Variant))
 getDevicePropertyMap obj = do
     client <- systemBusClient
-    response <- callProxyBlocking client (devicePropertyProxy obj) "GetAll" [] $
+    response <- runDBus client $ callProxyBlocking (devicePropertyProxy obj) "GetAll" [] $
                 [toVariant ("org.freedesktop.UDisks.Device" :: String)]
     case response of
         Left e -> do  -- Error, trying to get cached map

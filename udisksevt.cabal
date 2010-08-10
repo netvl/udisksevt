@@ -1,18 +1,19 @@
 Name: udisksevt
-Version: 1.0
+Version: 1.1
 Cabal-Version: >=1.2
 Build-Type: Simple
 License: GPL-2
 License-File: LICENSE
-Author: DPX-Infinity
+Author: Vladimir Matveev
+Maintainer: dpx.infinity@gmail.com
 Homepage: http://github.com/dpx-infinity/udisksevt/
 Synopsis: UDisks helper program - events monitor
 
 Executable udisksevt
-    Hs-Source-Dirs: ., ./UDisksEvt
-    Build-Depends: dbus-client>=0.3, dbus-core>=0.8, parsec>=2.1 && <3,
-                   base>=4.2, text, mtl, containers, stm, process,
-                   unix
+    Hs-Source-Dirs: .
+    Build-Depends: dbus-client>=0.4, dbus-core>=0.8, parsec>=2.1 && <3,
+                   base>=4.2, text, transformers, monads-tf, containers, stm,
+                   process, unix
     Main-Is: Main.hs
     Other-Modules: UDisksEvt.Config
                  , UDisksEvt.DBus

@@ -9,6 +9,7 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.State
+import Control.Monad.IO.Class
 import Data.Int
 import Data.List
 import Data.Maybe
@@ -57,7 +58,6 @@ runShell cmd = do
     let CVString sh = fromJust $ M.lookup "shell-command" $ cVars $ uConfig ?st
     let shcmd = sh ++ " -c '" ++ cmd ++ "'"
     logRunningCommand shcmd
---    runCommand shcmd
     devnull <- openFile "/dev/null" ReadWriteMode 
     _ <- runProcess sh ["-c", cmd] Nothing Nothing (Just devnull) (Just devnull) (Just devnull)
     return ()
@@ -70,10 +70,11 @@ runSignalHandlers conf = do
     -- Set initial state
     let ?st = U conf devs
     -- Set signals based on triggers mapping
-    mapM_ (setSignal client) triggers
+    runDBus client $ mapM_ setSignal triggers
     where
-        setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
-        setSignal client (rtype, rule) = onSignal client rule (signalDispatcher rtype)
+        setSignal :: (?st :: UState) => (String, MatchRule) -> DBus ()
+        -- Left composition section used for two parameters passing
+        setSignal (rtype, rule) = onSignal rule ((liftIO .) . signalDispatcher rtype)
 
 -- Runs trigger on signal
 signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
@@ -186,7 +187,7 @@ substituteParameters dev s = doReplaces s $ getVarPositions s
             where
                 f :: String -> Int -> Bool
                      -> State ([(Int, Int, String)], String, Int) ()
-                f "" _ False = return ()
+                f "" _ False = return () 
                 f "" _ True = put ([], "", 0)
                 f ('$':s) i False = do
                     modify $ \(lst, v, ib) -> (lst, "", i)

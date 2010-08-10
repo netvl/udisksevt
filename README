@@ -10,11 +10,12 @@ http://bbs.archlinux.org/viewtopic.php?id=84792
 === Requirements ===
 To build the program you need Glasgow Haskell Compiler at least 6.10 version and
 following haskell packages installed:
-    dbus-client >= 0.3
+    dbus-client >= 0.4
     dbus-core >= 0.8
     parsec >= 2.1 && < 3
     text
-    mtl
+    transformers
+    monads-tf
     containers
     stm
     process
