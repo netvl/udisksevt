@@ -3,21 +3,21 @@
 pkgname=haskell-dbus-client-parsec3
 _pkgname=haskell-dbus-client
 pkgrel=1
-pkgver=0.4
+pkgver=0.3
 pkgdesc="Monadic and object-oriented interfaces to DBus"
 url="http://hackage.haskell.org/package/dbus-client"
 license=('GPL-3')
 arch=('i686' 'x86_64')
-provides=('haskell-dbus-client=0.4')
+provides=('haskell-dbus-client=0.3')
 conflicts=('haskell-dbus-client')
 makedepends=()
-depends=('ghc' 'haskell-cabal' 'haskell-containers' 'haskell-dbus-core-parsec3' 'haskell-monads-tf' 'haskell-text' 'haskell-transformers')
+depends=('ghc' 'haskell-cabal' 'haskell-containers' 'haskell-dbus-core-parsec3' 'haskell-text')
 options=('strip')
-source=(http://hackage.haskell.org/packages/archive/dbus-client/0.4/dbus-client-0.4.tar.gz)
+source=(http://hackage.haskell.org/packages/archive/dbus-client/0.3/dbus-client-0.3.tar.gz)
 install=haskell-dbus-client.install
-md5sums=('b9ba5e97b08d667022f25ee5db2301f9')
+md5sums=('ec4ec473a658d183fb2cf2cd99aed6a7')
 build() {
-    cd ${srcdir}/dbus-client-0.4
+    cd ${srcdir}/dbus-client-0.3
     runhaskell Setup configure --prefix=/usr --docdir=/usr/share/doc/${_pkgname} || return 1
     runhaskell Setup build                   || return 1
     runhaskell Setup haddock || return 1

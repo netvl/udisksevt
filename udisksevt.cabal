@@ -10,7 +10,7 @@ Synopsis: UDisks helper program - events monitor
 
 Executable udisksevt
     Hs-Source-Dirs: ., ./UDisksEvt
-    Build-Depends: dbus-client>=0.3, dbus-core>=0.8, parsec>=2.1 && <3,
+    Build-Depends: dbus-client==0.3, dbus-core>=0.8, parsec>=2.1 && <3,
                    base>=4.2, text, mtl, containers, stm, process,
                    unix
     Main-Is: Main.hs
