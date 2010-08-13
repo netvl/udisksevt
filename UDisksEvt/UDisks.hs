@@ -33,12 +33,10 @@ import UDisksEvt.Log
 
 -- Triggers - match rules mapping
 triggers :: [(String, MatchRule)]
-triggers = map f $ [ ("added", "DeviceAdded", [])
-                   , ("removed", "DeviceRemoved", [])
-                   , ("mounted", "DeviceJobChanged",
-                      [StringValue 2 "FilesystemMount"])
-                   , ("unmounted", "DeviceJobChanged",
-                      [StringValue 2 "FilesystemUnmount"])
+triggers = map f $ [ ("added",     "DeviceAdded",      [])
+                   , ("removed",   "DeviceRemoved",    [])
+                   , ("mounted",   "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
+                   , ("unmounted", "DeviceJobChanged", [StringValue 2 "FilesystemUnmount"])
                    ]
     where
         f (tn, mm, mp) =
@@ -55,7 +53,7 @@ triggers = map f $ [ ("added", "DeviceAdded", [])
 runShell :: (?st :: UState) => String -> IO ()
 runShell cmd = do
     let CVString sh = fromJust $ M.lookup "shell-command" $ cVars $ uConfig ?st
-    let shcmd = sh ++ " -c '" ++ cmd ++ "'"
+        shcmd = sh ++ " -c '" ++ cmd ++ "'"
     logRunningCommand shcmd
 --    runCommand shcmd
     devnull <- openFile "/dev/null" ReadWriteMode 
