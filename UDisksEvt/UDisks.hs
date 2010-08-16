@@ -30,10 +30,10 @@ import UDisksEvt.DBus
 import UDisksEvt.Datatypes
 import UDisksEvt.Disk
 import UDisksEvt.Log
+import UDisksEvt.Utils
 
 -- Triggers - match rules mapping
-triggers :: [(String, DeviceType, MatchRule)]
-triggers = map f $ [ ("added",     DTFlashMemory, "DeviceAdded",      [])
+{- triggers = map f $ [ ("added",     DTFlashMemory, "DeviceAdded",      [])
                    , ("added",     DTOpticalDisc, "DeviceChanged",    [])
                    , ("removed",   DTFlashMemory, "DeviceRemoved",    [])
                    , ("mounted",   DTFlashMemory, "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
@@ -48,7 +48,18 @@ triggers = map f $ [ ("added",     DTFlashMemory, "DeviceAdded",      [])
                                , matchInterface = Just "org.freedesktop.UDisks"
                                , matchMember = Just mm
                                , matchParameters = mp
-                               })
+                               }) -}
+
+udisksSignalMatchRule :: MatchRule
+udisksSignalMatchRule = MatchRule { matchType = Just MR.Signal
+                                  , matchSender = Nothing
+                                  , matchDestination = Nothing
+                                  , matchPath = Just "/org/freedesktop/UDisks"
+                                  , matchInterface = Just "org.freedesktop.UDisks"
+                                  , matchMember = Nothing
+                                  , matchParameters = []
+                                  }
+
 
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
@@ -68,24 +79,41 @@ runSignalHandlers conf = do
     devs <- newTVarIO M.empty
     -- Set initial state
     let ?st = U conf devs
-    -- Set signals based on triggers mapping
-    mapM_ (setSignal client) triggers
-    where
-        setSignal :: (?st :: UState) => Client -> (String, DeviceType, MatchRule) -> IO ()
-        setSignal client (rname, dtype, rule) = onSignal client rule (signalDispatcher rname dtype)
+    -- Set signal handler routine
+    onSignal client udisksSignalMatchRule signalHandler
 
--- Runs trigger on signal
-signalDispatcher :: (?st :: UState) => String -> DeviceType -> BusName -> Signal -> IO ()
-signalDispatcher rname dtype _ sig = runTrigger rname dtype obj
+-- Performs various actions depending on signal
+signalHandler :: (?st :: UState) => BusName -> Signal -> IO ()
+signalHandler _ (signalMember `fork` signalBody -> (sname, sbody)) = do
+    mrname <- case sname of
+        "DeviceAdded" -> return $ Just "added"
+        "DeviceRemoved" -> return $ Just "removed"
+        "DeviceJobChanged" -> case jobid of
+            "FilesystemMount" -> return $ Just "mounted"
+            "FilesystemUnmount" -> return $ Just "unmounted"
+            _ -> return Nothing
+        "DeviceChanged" -> do
+            (isoptical, isinserted) <- isDeviceOpticalDisc obj
+            if isoptical
+                then if isinserted
+                     then return $ Just "added"
+                     else return $ Just "removed"
+                else return $ Nothing
+    case mrname of
+        Nothing -> return ()  -- Do nothing
+        Just rname -> runTrigger rname obj  -- Process the signal
     where
-        obj = fromJust $ fromVariant $ head $ signalBody sig
+        obj :: ObjectPath
+        obj = fromJust $ fromVariant (head sbody)  -- Extract object name
+        jobid :: String
+        jobid = fromJust $ fromVariant (sbody !! 3)  -- Extract job id
 
 -- Extracts trigger actions and executes them sequentially if device is not internal
-runTrigger :: (?st :: UState) => String -> DeviceType -> ObjectPath -> IO ()
-runTrigger rname dtype obj = do
+runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
+runTrigger rname obj = do
     logOk $ "Signal caught on trigger " ++ show rname ++ ":\n\t" ++ show obj
     -- Check device whether we have to process the device
-    checkDevice obj dtype >>= \v -> when v $ do
+    checkDevice obj >>= \v -> when v $ do
         -- Necessary delay - otherwise the device isn't mounted properly
         -- before retrieving its properties, resulting in an inability
         -- to get mount point
@@ -106,7 +134,7 @@ checkDevice :: (?st :: UState) => ObjectPath -> IO Bool
 checkDevice obj = do
     -- Check if device is internal
     internal <- isDeviceInternal obj
-    lokOk $ "Is device internal: " ++ show internal
+    logOk $ "Is device internal: " ++ show internal
     if internal  -- False if internal
         then return False
         else do
@@ -228,41 +256,3 @@ substituteParameters dev s = doReplaces s $ getVarPositions s
                 replacement = case M.lookup v (diProperties dev) of
                     Nothing -> ""
                     Just val -> variantToString val
-
--- Converts arbitrary Variant value to its string representation
--- Just shows plain values, recursively shows Variant values,
--- shows special values as strings and takes the first element of
--- dictionaries and arrays
-variantToString :: Variant -> String
-variantToString v = f (variantType v)
-    where  -- These are different cases of Variant types
-        f DBusString =
-            fromJust $ (fromVariant v :: Maybe String)
-        f DBusObjectPath =
-            objectPathToString $ fromJust $ (fromVariant v :: Maybe ObjectPath)
-        f DBusSignature =
-            B.unpack $ strSignature $ fromJust $ (fromVariant v :: Maybe Signature)
-        f DBusVariant =
-            variantToString $ fromJust $ (fromVariant v :: Maybe Variant)
-        f (DBusArray _) =
-            maybe "" variantToString $ listToMaybe $
-            arrayItems $ fromJust $ fromVariant $ v
-        f (DBusDictionary _ _) =
-            maybe "" variantToString $ fmap snd $ listToMaybe $
-            dictionaryItems $ fromJust $ fromVariant v
-        f t = case t of
-            DBusBoolean -> show $ fromJust $ (fromVariant v :: Maybe Bool)
-            DBusByte    -> show $ fromJust $ (fromVariant v :: Maybe Word8)
-            DBusInt16   -> show $ fromJust $ (fromVariant v :: Maybe Int16)
-            DBusInt32   -> show $ fromJust $ (fromVariant v :: Maybe Int32)
-            DBusInt64   -> show $ fromJust $ (fromVariant v :: Maybe Int64)
-            DBusWord16	-> show $ fromJust $ (fromVariant v :: Maybe Word16)
-            DBusWord32	-> show $ fromJust $ (fromVariant v :: Maybe Word32)
-            DBusWord64	-> show $ fromJust $ (fromVariant v :: Maybe Word64)
-            DBusDouble	-> show $ fromJust $ (fromVariant v :: Maybe Double)
-
-    {- replace "$DEVICE$" (diDeviceFile dev) .
-    maybe (replace "$MOUNTPATH$" "<not mounted>")                           
-    (replace "$MOUNTPATH$") (diMountPoint dev) .
-    replace "$LABEL$" (diLabel dev) .
-    replace "$OBJECTPATH$" (diObjectPath dev) -}

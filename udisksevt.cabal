@@ -20,4 +20,4 @@ Executable udisksevt
                  , UDisksEvt.Disk
                  , UDisksEvt.Log
                  , UDisksEvt.UDisks
-    Extensions: OverloadedStrings, TupleSections, ImplicitParams
+    Extensions: OverloadedStrings, TupleSections, ImplicitParams, ViewPatterns

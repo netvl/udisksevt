@@ -19,18 +19,7 @@ import qualified Data.Map as M
 import UDisksEvt.Datatypes
 import UDisksEvt.Disk
 import UDisksEvt.Log
-
---- MOVE SOMEHERE ---
--- http://bluebones.net/2007/01/replace-in-haskell/ - Joseph's function
-replace :: (Eq a) => [a] -> [a] -> [a] -> [a]
-replace [] _ list = list
-replace oldSub newSub list = _replace list where
-	_replace list@(h:ts) = if oldSub `isPrefixOf` list
-		then newSub ++ _replace (drop len list)
-		else h : _replace ts
-	_replace [] = []
-	len = length oldSub
---- MOVE SOMEWHERE ---
+import UDisksEvt.Utils
 
 -- Proxy for /org/freedesktop/UDisks object
 udisksProxy = Proxy (RemoteObject "org.freedesktop.UDisks" "/org/freedesktop/UDisks")
@@ -171,7 +160,7 @@ isDeviceOpticalDisc obj = do
     v1 <- getDeviceProperty obj "DeviceIsOpticalDisc"
     let mp1 = v1 >>= fromVariant :: Maybe Bool
     case mp1 of
-        Nothing -> (False, False)  -- Something wrong with the property itself
+        Nothing -> return (False, False)  -- Something wrong with the property itself
         Just p1 ->
             if p1  -- If True, then device is optical drive and disc is inserted
             then return (True, True)
@@ -181,4 +170,4 @@ isDeviceOpticalDisc obj = do
                 case mp2 of  -- Determine type by device name
                     Nothing -> return (False, False)
                     Just p2 ->  -- Yes, it's dirty but I couldn't think out something other
-                        return (or $ map (`isSuffixOf` v2) ["sr" ++ show i | i <- [0..9]], False)
+                        return (or $ map (`isSuffixOf` p2) ["sr" ++ show i | i <- [0..9]], False)

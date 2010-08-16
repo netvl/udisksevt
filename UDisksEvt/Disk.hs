@@ -12,10 +12,7 @@ import qualified Data.Map as M
 import qualified Data.Text.Lazy as B
 
 import UDisksEvt.Datatypes
-
--- Cast ObjectPath value to string
-objectPathToString :: ObjectPath -> String
-objectPathToString = B.unpack . strObjectPath
+import UDisksEvt.Utils
 
 -- Get device property from cache
 getDevicePropertyCached :: (?st :: UState) => ObjectPath -> String -> IO (Maybe Variant)
