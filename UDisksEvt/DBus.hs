@@ -160,24 +160,25 @@ isDeviceFilesystem obj = do
         Just devtype -> devtype == ("filesystem" :: String)
 
 --- CHECK IF OPTICAL DEVICE HAS IsInternal PROPERTY ---
+-- No it doesn't; I leave this notice though, maybe it'll be useful later :)
 
 -- Checks whether device is an optical disk
 -- Checks different device properties
--- Returns a pair of bools, the first designates if device is optical disc,
--- the second - if it is inserted
-isDeviceOpticalDisc :: (?st :: UState) => ObjectPath -> IO Bool
+-- Returns a pair of bools, the first designates if device is optical drive,
+-- the second - if the media is inserted
+isDeviceOpticalDisc :: (?st :: UState) => ObjectPath -> IO (Bool, Bool)
 isDeviceOpticalDisc obj = do
     v1 <- getDeviceProperty obj "DeviceIsOpticalDisc"
     let mp1 = v1 >>= fromVariant :: Maybe Bool
     case mp1 of
-        Nothing -> (False, False)
+        Nothing -> (False, False)  -- Something wrong with the property itself
         Just p1 ->
-            if p1  -- If True, then device is optical and disc is inserted
+            if p1  -- If True, then device is optical drive and disc is inserted
             then return (True, True)
-            else do
+            else do  -- We cannot surely say that device is not optical drive though
                 v2 <- getDeviceProperty obj "DeviceFile"
                 let mp2 = v2 >>= fromVariant :: Maybe String
                 case mp2 of  -- Determine type by device name
                     Nothing -> return (False, False)
-                    Just p2 ->
-                        return $ or $ map (`isSuffixOf` v2) ["sr" ++ show i | i <- [0..9]]
+                    Just p2 ->  -- Yes, it's dirty but I couldn't think out something other
+                        return (or $ map (`isSuffixOf` v2) ["sr" ++ show i | i <- [0..9]], False)

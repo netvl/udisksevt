@@ -32,23 +32,23 @@ import UDisksEvt.Disk
 import UDisksEvt.Log
 
 -- Triggers - match rules mapping
-triggers :: [(String, MatchRule)]
-triggers = map f $ [ ("added",     "DeviceAdded",      [])
-                   , ("added",     "DeviceChanged",    [])
-                   , ("removed",   "DeviceRemoved",    [])
-                   , ("mounted",   "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
-                   , ("unmounted", "DeviceJobChanged", [StringValue 2 "FilesystemUnmount"])
+triggers :: [(String, DeviceType, MatchRule)]
+triggers = map f $ [ ("added",     DTFlashMemory, "DeviceAdded",      [])
+                   , ("added",     DTOpticalDisc, "DeviceChanged",    [])
+                   , ("removed",   DTFlashMemory, "DeviceRemoved",    [])
+                   , ("mounted",   DTFlashMemory, "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
+                   , ("unmounted", DTFlashMemory, "DeviceJobChanged", [StringValue 2 "FilesystemUnmount"])
                    ]
     where
-        f (tn, mm, mp) =
-            (tn, MatchRule { matchType = Just MR.Signal
-                           , matchSender = Nothing
-                           , matchDestination = Nothing
-                           , matchPath = Just "/org/freedesktop/UDisks"
-                           , matchInterface = Just "org.freedesktop.UDisks"
-                           , matchMember = Just mm
-                           , matchParameters = mp
-                           })
+        f (tn, dt, mm, mp) =
+            (tn, dt, MatchRule { matchType = Just MR.Signal
+                               , matchSender = Nothing
+                               , matchDestination = Nothing
+                               , matchPath = Just "/org/freedesktop/UDisks"
+                               , matchInterface = Just "org.freedesktop.UDisks"
+                               , matchMember = Just mm
+                               , matchParameters = mp
+                               })
 
 -- Run shell command
 runShell :: (?st :: UState) => String -> IO ()
@@ -71,21 +71,21 @@ runSignalHandlers conf = do
     -- Set signals based on triggers mapping
     mapM_ (setSignal client) triggers
     where
-        setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
-        setSignal client (rname, rule) = onSignal client rule (signalDispatcher rname)
+        setSignal :: (?st :: UState) => Client -> (String, DeviceType, MatchRule) -> IO ()
+        setSignal client (rname, dtype, rule) = onSignal client rule (signalDispatcher rname dtype)
 
 -- Runs trigger on signal
-signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
-signalDispatcher rname _ sig = runTrigger rname obj
+signalDispatcher :: (?st :: UState) => String -> DeviceType -> BusName -> Signal -> IO ()
+signalDispatcher rname dtype _ sig = runTrigger rname dtype obj
     where
         obj = fromJust $ fromVariant $ head $ signalBody sig
 
 -- Extracts trigger actions and executes them sequentially if device is not internal
-runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
-runTrigger rname obj = do
+runTrigger :: (?st :: UState) => String -> DeviceType -> ObjectPath -> IO ()
+runTrigger rname dtype obj = do
     logOk $ "Signal caught on trigger " ++ show rname ++ ":\n\t" ++ show obj
     -- Check device whether we have to process the device
-    checkDevice obj >>= \v -> when v $ do
+    checkDevice obj dtype >>= \v -> when v $ do
         -- Necessary delay - otherwise the device isn't mounted properly
         -- before retrieving its properties, resulting in an inability
         -- to get mount point

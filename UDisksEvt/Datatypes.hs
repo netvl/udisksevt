@@ -32,6 +32,10 @@ data ConfigTriggerAction = CTAShellCommand { ctascCommand :: String
                                            }
                          deriving (Show)
 
+-- Device type flag
+data DeviceType = DTFlashMemory
+                | DTOpticalDisc
+
 -- Notification urgency parameter
 data NotificationUrgency = NULow                         
                          | NUNormal
