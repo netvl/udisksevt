@@ -34,6 +34,7 @@ import UDisksEvt.Log
 -- Triggers - match rules mapping
 triggers :: [(String, MatchRule)]
 triggers = map f $ [ ("added",     "DeviceAdded",      [])
+                   , ("added",     "DeviceChanged",    [])
                    , ("removed",   "DeviceRemoved",    [])
                    , ("mounted",   "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
                    , ("unmounted", "DeviceJobChanged", [StringValue 2 "FilesystemUnmount"])
@@ -71,42 +72,50 @@ runSignalHandlers conf = do
     mapM_ (setSignal client) triggers
     where
         setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
-        setSignal client (rtype, rule) = onSignal client rule (signalDispatcher rtype)
+        setSignal client (rname, rule) = onSignal client rule (signalDispatcher rname)
 
 -- Runs trigger on signal
 signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
-signalDispatcher rtype _ sig = runTrigger rtype obj
+signalDispatcher rname _ sig = runTrigger rname obj
     where
         obj = fromJust $ fromVariant $ head $ signalBody sig
 
 -- Extracts trigger actions and executes them sequentially if device is not internal
 runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
-runTrigger rtype obj = do
-    logOk $ "Signal caught on trigger " ++ show rtype ++ ":\n\t" ++ show obj
-    -- Exit if device is internal - we do not have to act on such devices
+runTrigger rname obj = do
+    logOk $ "Signal caught on trigger " ++ show rname ++ ":\n\t" ++ show obj
+    -- Check device whether we have to process the device
+    checkDevice obj >>= \v -> when v $ do
+        -- Necessary delay - otherwise the device isn't mounted properly
+        -- before retrieving its properties, resulting in an inability
+        -- to get mount point
+        when (rname == "mounted") $ threadDelay 1000000
+        logOk $ "Running trigger actions..."
+        -- Get trigger actions and perform them
+        let mctas = getTrigger (uConfig ?st) rname
+        case mctas of
+            Nothing -> logTriggerError rname
+            Just ctas -> mapM_ (executeTriggerAction obj) ctas
+        -- Delete device info from cache if it is removed
+        when (rname == "removed") $ atomically $ do
+            devs <- readTVar (uDevices ?st)
+            writeTVar (uDevices ?st) $ M.delete (objectPathToString obj) devs
+
+-- Check necessary device parameters
+checkDevice :: (?st :: UState) => ObjectPath -> IO Bool
+checkDevice obj = do
+    -- Check if device is internal
     internal <- isDeviceInternal obj
-    logOk $ "Is device internal: " ++ show internal
-    unless internal $ do
-        -- Exit if device is not filesystem
-        filesystem <- isDeviceFilesystem obj
---        getDevicePropertyMap obj >>= print . snd
-        logOk $ "Is device filesystem: " ++ show filesystem
-        when filesystem $ do
-            -- Necessary delay - otherwise the device isn't mounted properly
-            -- before retrieving its properties, resulting in an inability
-            -- to get mount point
-            when (rtype == "mounted") $ threadDelay 1000000
-            logOk $ "Running trigger actions..."
-            -- Get trigger actions and perform them
-            let mctas = getTrigger (uConfig ?st) rtype
-            case mctas of
-                Nothing -> logTriggerError rtype
-                Just ctas -> mapM_ (executeTriggerAction obj) ctas
-            -- Delete device info from cache if it is removed
-            when (rtype == "removed") $ atomically $ do
-                devs <- readTVar (uDevices ?st)
-                writeTVar (uDevices ?st) $ M.delete (objectPathToString obj) devs
-                
+    lokOk $ "Is device internal: " ++ show internal
+    if internal  -- False if internal
+        then return False
+        else do
+            -- Check if device is filesystem
+            filesystem <- isDeviceFilesystem obj
+            logOk $ "Is device filesystem: " ++ show filesystem
+            if not filesystem
+                then return False  -- False if device is not a filesystem
+                else return True
 
 -- Executes trigger action
 executeTriggerAction :: (?st :: UState) => ObjectPath -> ConfigTriggerAction -> IO ()
@@ -179,25 +188,32 @@ substituteParameters dev s = doReplaces s $ getVarPositions s
     where
         -- Retrieves left and right bounds and values of all $VAR$-variables
         -- in specified string
+        -- Simple state machine
         getVarPositions :: String -> [(Int, Int, String)]
         getVarPositions s = (\(x, _, _) -> x) $ execState (f s 0 False) ([], "", 0)
             where
                 f :: String -> Int -> Bool
                      -> State ([(Int, Int, String)], String, Int) ()
+                -- Correct ending, no opened variables
                 f "" _ False = return ()
+                -- Incorrect ending, there is an opened variable
                 f "" _ True = put ([], "", 0)
+                -- Beginning of variable
                 f ('$':s) i False = do
                     modify $ \(lst, v, ib) -> (lst, "", i)
                     f s (i+1) True
+                -- Ending of variable
                 f ('$':s) i True = do
                     modify $ \(lst, v, ib) -> ((ib, i, v):lst, "", 0)
                     f s (i+1) False
+                -- The string outside variable
                 f (c:s) i False =
                     f s (i+1) False
+                -- Variable data
                 f (c:s) i True = do
                     modify $ \(lst, v, ib) -> (lst, v ++ [c], ib)
                     f s (i+1) True
-        
+
         -- Replacing loop
         doReplaces :: String -> [(Int, Int, String)] -> String
         doReplaces s [] = s
