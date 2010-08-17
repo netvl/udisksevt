@@ -1,8 +1,8 @@
 # Contributor: Vladimir Matveev <dpx.infinity at gmail point com>
 #
 pkgname=udisksevt-git
-pkgver=20100612
-pkgrel=5
+pkgver=20100817
+pkgrel=1
 pkgdesc="UDisks events handler daemon - git version"
 arch=('i686' 'x86_64')
 url="http://github.com/dpx-infinity/udisksevt/"
@@ -23,7 +23,7 @@ build() {
     cd $_gitname && git pull origin
     msg "The local files are updated."
   else
-    git clone $_gitroot $_gitname
+    git clone -b dbus-client-0.3 $_gitroot $_gitname
   fi
 
   msg "GIT checkout done or server timeout"

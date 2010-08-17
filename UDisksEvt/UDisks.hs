@@ -32,24 +32,7 @@ import UDisksEvt.Disk
 import UDisksEvt.Log
 import UDisksEvt.Utils
 
--- Triggers - match rules mapping
-{- triggers = map f $ [ ("added",     DTFlashMemory, "DeviceAdded",      [])
-                   , ("added",     DTOpticalDisc, "DeviceChanged",    [])
-                   , ("removed",   DTFlashMemory, "DeviceRemoved",    [])
-                   , ("mounted",   DTFlashMemory, "DeviceJobChanged", [StringValue 2 "FilesystemMount"])
-                   , ("unmounted", DTFlashMemory, "DeviceJobChanged", [StringValue 2 "FilesystemUnmount"])
-                   ]
-    where
-        f (tn, dt, mm, mp) =
-            (tn, dt, MatchRule { matchType = Just MR.Signal
-                               , matchSender = Nothing
-                               , matchDestination = Nothing
-                               , matchPath = Just "/org/freedesktop/UDisks"
-                               , matchInterface = Just "org.freedesktop.UDisks"
-                               , matchMember = Just mm
-                               , matchParameters = mp
-                               }) -}
-
+-- Signal matching rule
 udisksSignalMatchRule :: MatchRule
 udisksSignalMatchRule = MatchRule { matchType = Just MR.Signal
                                   , matchSender = Nothing
@@ -67,7 +50,6 @@ runShell cmd = do
     let CVString sh = fromJust $ M.lookup "shell-command" $ cVars $ uConfig ?st
         shcmd = sh ++ " -c '" ++ cmd ++ "'"
     logRunningCommand shcmd
---    runCommand shcmd
     devnull <- openFile "/dev/null" ReadWriteMode 
     _ <- runProcess sh ["-c", cmd] Nothing Nothing (Just devnull) (Just devnull) (Just devnull)
     return ()
@@ -85,6 +67,9 @@ runSignalHandlers conf = do
 -- Performs various actions depending on signal
 signalHandler :: (?st :: UState) => BusName -> Signal -> IO ()
 signalHandler _ (signalMember `fork` signalBody -> (sname, sbody)) = do
+    logOk $ "Caught UDisks signal '" ++ (B.unpack $ strMemberName sname) ++ "' with body:\n\t" ++
+            show sbody
+    threadDelay 500000  -- Delay is needed for correct properties retrieval
     mrname <- case sname of
         "DeviceAdded" -> return $ Just "added"
         "DeviceRemoved" -> return $ Just "removed"
@@ -93,12 +78,14 @@ signalHandler _ (signalMember `fork` signalBody -> (sname, sbody)) = do
             "FilesystemUnmount" -> return $ Just "unmounted"
             _ -> return Nothing
         "DeviceChanged" -> do
-            (isoptical, isinserted) <- isDeviceOpticalDisc obj
+            (isoptical, isinserted, ismountedcached) <- isDeviceOpticalDisc obj
             if isoptical
                 then if isinserted
-                     then return $ Just "added"
+                     then if ismountedcached  -- This means that device is simply unmounted
+                          then return Nothing
+                          else return $ Just "added"
                      else return $ Just "removed"
-                else return $ Nothing
+                else return Nothing
     case mrname of
         Nothing -> return ()  -- Do nothing
         Just rname -> runTrigger rname obj  -- Process the signal
@@ -106,18 +93,14 @@ signalHandler _ (signalMember `fork` signalBody -> (sname, sbody)) = do
         obj :: ObjectPath
         obj = fromJust $ fromVariant (head sbody)  -- Extract object name
         jobid :: String
-        jobid = fromJust $ fromVariant (sbody !! 3)  -- Extract job id
+        jobid = fromJust $ fromVariant (sbody !! 2)  -- Extract job id
 
 -- Extracts trigger actions and executes them sequentially if device is not internal
 runTrigger :: (?st :: UState) => String -> ObjectPath -> IO ()
 runTrigger rname obj = do
-    logOk $ "Signal caught on trigger " ++ show rname ++ ":\n\t" ++ show obj
+    logOk $ "Executing trigger " ++ show rname ++ ":\n\t" ++ show obj
     -- Check device whether we have to process the device
-    checkDevice obj >>= \v -> when v $ do
-        -- Necessary delay - otherwise the device isn't mounted properly
-        -- before retrieving its properties, resulting in an inability
-        -- to get mount point
-        when (rname == "mounted") $ threadDelay 1000000
+    checkDevice rname obj >>= \v -> when v $ do
         logOk $ "Running trigger actions..."
         -- Get trigger actions and perform them
         let mctas = getTrigger (uConfig ?st) rname
@@ -130,20 +113,22 @@ runTrigger rname obj = do
             writeTVar (uDevices ?st) $ M.delete (objectPathToString obj) devs
 
 -- Check necessary device parameters
-checkDevice :: (?st :: UState) => ObjectPath -> IO Bool
-checkDevice obj = do
+checkDevice :: (?st :: UState) => String -> ObjectPath -> IO Bool
+checkDevice rname obj = do
     -- Check if device is internal
     internal <- isDeviceInternal obj
     logOk $ "Is device internal: " ++ show internal
     if internal  -- False if internal
         then return False
-        else do
-            -- Check if device is filesystem
-            filesystem <- isDeviceFilesystem obj
-            logOk $ "Is device filesystem: " ++ show filesystem
-            if not filesystem
-                then return False  -- False if device is not a filesystem
-                else return True
+        else if rname == "removed"
+             then return True  -- This is needed for CD/DVD devices
+             else do
+                 -- Check if device is filesystem
+                 filesystem <- isDeviceFilesystem obj
+                 logOk $ "Is device filesystem: " ++ show filesystem
+                 if not filesystem
+                     then return False  -- False if device is not a filesystem
+                     else return True
 
 -- Executes trigger action
 executeTriggerAction :: (?st :: UState) => ObjectPath -> ConfigTriggerAction -> IO ()
@@ -234,7 +219,7 @@ substituteParameters dev s = doReplaces s $ getVarPositions s
                 f ('$':s) i True = do
                     modify $ \(lst, v, ib) -> ((ib, i, v):lst, "", 0)
                     f s (i+1) False
-                -- The string outside variable
+                -- The string outside any variable
                 f (c:s) i False =
                     f s (i+1) False
                 -- Variable data

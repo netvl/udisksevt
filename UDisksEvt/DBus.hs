@@ -153,21 +153,26 @@ isDeviceFilesystem obj = do
 
 -- Checks whether device is an optical disk
 -- Checks different device properties
--- Returns a pair of bools, the first designates if device is optical drive,
--- the second - if the media is inserted
-isDeviceOpticalDisc :: (?st :: UState) => ObjectPath -> IO (Bool, Bool)
+-- Returns a triple of bools, the first of which designates if device is optical drive,
+-- the second - if the media is inserted, the third - whether device is mounted
+isDeviceOpticalDisc :: (?st :: UState) => ObjectPath -> IO (Bool, Bool, Bool)
 isDeviceOpticalDisc obj = do
     v1 <- getDeviceProperty obj "DeviceIsOpticalDisc"
     let mp1 = v1 >>= fromVariant :: Maybe Bool
     case mp1 of
-        Nothing -> return (False, False)  -- Something wrong with the property itself
+        Nothing -> return (False, False, False)  -- Something wrong with the property itself
         Just p1 ->
             if p1  -- If True, then device is optical drive and disc is inserted
-            then return (True, True)
+            then do  -- Check whether device is mounted
+                v2 <- getDevicePropertyCached obj "DeviceIsMounted"
+                let mp2 = v2 >>= fromVariant :: Maybe Bool
+                case mp2 of
+                    Nothing -> return (False, False, False)  -- Something wrong again
+                    Just p2 -> return (True, True, p2)
             else do  -- We cannot surely say that device is not optical drive though
                 v2 <- getDeviceProperty obj "DeviceFile"
                 let mp2 = v2 >>= fromVariant :: Maybe String
                 case mp2 of  -- Determine type by device name
-                    Nothing -> return (False, False)
+                    Nothing -> return (False, False, False)  -- Something wrong
                     Just p2 ->  -- Yes, it's dirty but I couldn't think out something other
-                        return (or $ map (`isSuffixOf` p2) ["sr" ++ show i | i <- [0..9]], False)
+                        return (or $ map (`isSuffixOf` p2) ["sr" ++ show i | i <- [0..9]], False, False)
