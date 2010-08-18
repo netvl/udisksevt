@@ -1,8 +1,8 @@
 # Contributor: Vladimir Matveev <dpx.infinity at gmail point com>
 #
 pkgname=udisksevt
-pkgver=1.0
-pkgrel=6
+pkgver=1.1
+pkgrel=1
 pkgdesc="UDisks events handler daemon"
 arch=('i686' 'x86_64')
 url="http://github.com/dpx-infinity/udisksevt/"
@@ -13,7 +13,7 @@ conflicts=('udisksevt-git')
 install=udisksevt.install
 
 source=(http://github.com/downloads/dpx-infinity/udisksevt/$pkgname-$pkgver.tar.bz2)
-md5sums=('0069d45a0eb2320c7cef021a76221410')
+md5sums=('44ed2e28adeab09fd8448b21ab3ade92')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"

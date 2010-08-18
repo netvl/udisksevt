@@ -1,10 +1,10 @@
 Name: udisksevt
-Version: 1.0
+Version: 1.1
 Cabal-Version: >=1.2
 Build-Type: Simple
 License: GPL-2
 License-File: LICENSE
-Author: DPX-Infinity
+Author: Vladimir Matveev
 Homepage: http://github.com/dpx-infinity/udisksevt/
 Synopsis: UDisks helper program - events monitor
 
