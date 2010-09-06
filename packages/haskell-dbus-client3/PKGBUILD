@@ -1,6 +1,6 @@
 # Contributor: Vladimir Matveev <dpx.infinity at gmail point com>
-# Modified haskell-dbus-client package; uses haskell-dbus-core-parsec3 as a dependency
-pkgname=haskell-dbus-client-parsec3
+# Fixed 0.3 version of haskell-dbus-client package
+pkgname=haskell-dbus-client3
 _pkgname=haskell-dbus-client
 pkgrel=1
 pkgver=0.3
@@ -11,7 +11,7 @@ arch=('i686' 'x86_64')
 provides=('haskell-dbus-client=0.3')
 conflicts=('haskell-dbus-client')
 makedepends=()
-depends=('ghc' 'haskell-cabal' 'haskell-containers' 'haskell-dbus-core-parsec3' 'haskell-text')
+depends=('ghc' 'haskell-cabal' 'haskell-containers' 'haskell-dbus-core' 'haskell-text')
 options=('strip')
 source=(http://hackage.haskell.org/packages/archive/dbus-client/0.3/dbus-client-0.3.tar.gz)
 install=haskell-dbus-client.install
