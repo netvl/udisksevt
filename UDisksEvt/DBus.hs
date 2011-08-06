@@ -1,12 +1,14 @@
 -- udisksevt source file
 -- Copyright (C) Vladimir Matveev, 2010
 -- D-Bus interface to UDisks daemon
+
+
 module UDisksEvt.DBus where
 
 import Control.Monad
 import Control.Monad.IO.Class
-import DBus.Bus
 import DBus.Client
+import DBus.Client.Simple (connectSession, connectSystem)
 import DBus.Message
 import DBus.Types
 import Data.List
@@ -16,6 +18,7 @@ import Data.Word
 import System.Environment
 
 import qualified Data.Map as M
+import qualified Data.Set (empty)  
 
 import UDisksEvt.Datatypes
 import UDisksEvt.Disk
@@ -33,69 +36,72 @@ replace oldSub newSub list = _replace list where
 	len = length oldSub
 --- MOVE SOMEWHERE ---
 
+        
+-- Interface proxies
+ifaceProxy :: BusName -> ObjectPath -> InterfaceName ->  MemberName -> [Variant] -> MethodCall
+ifaceProxy dest path iface member args = MethodCall path member (Just iface) (Just dest) Data.Set.empty args
+
+-- 
+                                         
 -- Proxy for /org/freedesktop/UDisks object
-udisksProxy = Proxy "org.freedesktop.UDisks" "/org/freedesktop/UDisks" "org.freedesktop.UDisks"
+udisksProxy = ifaceProxy "org.freedesktop.UDisks" "/org/freedesktop/UDisks" "org.freedesktop.UDisks"
 
 -- Proxy for arbitrary device for device methods
-deviceProxy dev = Proxy "org.freedesktop.UDisks" dev "org.freedesktop.UDisks.Device"
+deviceProxy dev = ifaceProxy "org.freedesktop.UDisks" dev "org.freedesktop.UDisks.Device"
 
 -- Proxy for arbitrary device for device properties
-devicePropertyProxy dev = Proxy "org.freedesktop.UDisks" dev "org.freedesktop.DBus.Properties"
+devicePropertyProxy dev = ifaceProxy "org.freedesktop.UDisks" dev "org.freedesktop.DBus.Properties"
 
 -- Notification daemon proxy
-notificationProxy = Proxy "org.freedesktop.Notifications" "/org/freedesktop/Notifications"
+notificationProxy = ifaceProxy "org.freedesktop.Notifications" "/org/freedesktop/Notifications"
                     "org.freedesktop.Notifications"
 
 -- Get system bus Client object
-systemBusClient = newClient =<< getSystemBus
+systemBusClient = connectSystem
 
 -- Get session bus Client object
-sessionBusClient = newClient =<< getSessionBus
+sessionBusClient = connectSession
 
 -- Wake UDisks daemon with a request
 wakeDaemon :: IO ()
 wakeDaemon = do
-    client <- systemBusClient
-    runDBus client $ callProxy udisksProxy "EnumerateDevices" [] [] (liftIO . logDBusError)
-                                                                    (liftIO . logDaemonStartup)
+  client <- systemBusClient 
+  call client (udisksProxy "EnumerateDevices" []) >>=
+    either logDBusError logDaemonStartup 
 
 -- Show notification using D-Bus org.freedesktop.Notifications server, if present
 showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency -> IO ()
 showNotification body summary icon timeout urgency = do
-    client <- sessionBusClient
-    let actions = fromJust $ toArray DBusString ([] :: [String])
     let nurgency = case urgency of
             NULow -> 0 :: Word8
             NUNormal -> 1
             NUCritical -> 2
-    let hints = fromJust $
-                dictionaryFromItems DBusString DBusVariant
-                    [(toVariant ("urgency" :: String), toVariant $ toVariant nurgency)]
+    let hints = toVariant [(("urgency" :: String), nurgency)]
     homepath <- getEnv "HOME"
     let CVString ricon = if icon /= "default"
                          then CVString icon
                          else fromJust $ M.lookup "default-notification-icon" $ cVars $
                               uConfig ?st
     let ricon' = replace "$HOME$" homepath ricon
-    runDBus client $ callProxy notificationProxy "Notify" []
-        ([ toVariant ("UDisksEvt" :: String)
-         , toVariant (0 :: Word32)
-         , toVariant ricon'
-         , toVariant summary
-         , toVariant body
-         , toVariant actions
-         , toVariant hints
-         , toVariant (fromIntegral timeout :: Int32)
-         ])
-        (liftIO . logNotifyError summary body) (liftIO . logNotifyOk summary body ricon')
+    client <- sessionBusClient
+    r <- call client $ notificationProxy "Notify" 
+                      ([ toVariant ("UDisksEvt" :: String)
+                       , toVariant (0 :: Word32)
+                       , toVariant ricon'
+                       , toVariant summary
+                       , toVariant body
+                       , toVariant ([] :: [String])
+                       , toVariant hints
+                       , toVariant (fromIntegral timeout :: Int32)
+                       ])
+    either (logNotifyError summary body) (logNotifyOk summary body ricon') r
     return ()
 
 -- Get device property either from UDisks or from device cache
 getDeviceProperty :: (?st :: UState) => ObjectPath -> String -> IO (Maybe Variant)
 getDeviceProperty obj pname = do
     client <- systemBusClient
-    response <- runDBus client $ callProxyBlocking (devicePropertyProxy obj) "Get" [] $
-                map toVariant ["org.freedesktop.UDisks.Device", pname]
+    response <- call client (devicePropertyProxy obj "Get" (map toVariant ["org.freedesktop.UDisks.Device", pname]))
     case response of
         Left _ -> do  -- Error, trying to retrieve value from cache
             prop <- getDevicePropertyCached obj pname
@@ -114,8 +120,8 @@ getDeviceProperty obj pname = do
 getDevicePropertyMap :: (?st :: UState) => ObjectPath -> IO (Bool, Maybe (M.Map String Variant))
 getDevicePropertyMap obj = do
     client <- systemBusClient
-    response <- runDBus client $ callProxyBlocking (devicePropertyProxy obj) "GetAll" [] $
-                [toVariant ("org.freedesktop.UDisks.Device" :: String)]
+    response <- call client (devicePropertyProxy obj "GetAll" 
+                             [toVariant ("org.freedesktop.UDisks.Device" :: String)])
     case response of
         Left e -> do  -- Error, trying to get cached map
             logError $ "Unable to get property map from D-Bus: " ++ show e
@@ -123,8 +129,7 @@ getDevicePropertyMap obj = do
             return (True, mpm)
         Right r -> do  -- Ok, extracting map from D-Bus dictionary
             let rh = head $ messageBody r
-                Just d = fromVariant rh
-                mpm = fromDictionary d
+                mpm= fromVariant rh
             return (False, mpm)
 
 -- Retrieve some device properties using it's property map in order to

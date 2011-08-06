@@ -14,9 +14,7 @@ import Data.Int
 import Data.List
 import Data.Maybe
 import Data.Word
-import DBus.Bus
 import DBus.Client
-import DBus.MatchRule as MR
 import DBus.Message
 import DBus.Types
 import System.IO
@@ -24,7 +22,7 @@ import System.Environment
 import System.Process
 
 import qualified Data.Map as M
-import qualified Data.Text.Lazy as B
+import qualified Data.Text as B
 
 import UDisksEvt.Config
 import UDisksEvt.DBus
@@ -34,22 +32,20 @@ import UDisksEvt.Log
 
 -- Triggers - match rules mapping
 triggers :: [(String, MatchRule)]
-triggers = map f $ [ ("added", "DeviceAdded", [])
-                   , ("removed", "DeviceRemoved", [])
-                   , ("mounted", "DeviceJobChanged",
-                      [StringValue 2 "FilesystemMount"])
-                   , ("unmounted", "DeviceJobChanged",
-                      [StringValue 2 "FilesystemUnmount"])
+triggers = map f $ [ ("added", "DeviceAdded")
+                   , ("removed", "DeviceRemoved")
+                   , ("mounted", "DeviceJobChanged")
+                   , ("unmounted", "DeviceJobChanged")
                    ]
     where
-        f (tn, mm, mp) =
-            (tn, MatchRule { matchType = Just MR.Signal
-                           , matchSender = Nothing
+        f (tn, mm) =
+            (tn, MatchRule { --matchType = Just MR.Signal,
+                           matchSender = Nothing
                            , matchDestination = Nothing
                            , matchPath = Just "/org/freedesktop/UDisks"
                            , matchInterface = Just "org.freedesktop.UDisks"
                            , matchMember = Just mm
-                           , matchParameters = mp
+                           --, matchParameters = mp
                            })
 
 -- Run shell command
@@ -70,12 +66,16 @@ runSignalHandlers conf = do
     -- Set initial state
     let ?st = U conf devs
     -- Set signals based on triggers mapping
-    runDBus client $ mapM_ setSignal triggers
+    mapM_ (setSignal client) triggers    
+    -- logOk "TEST"
     where
-        setSignal :: (?st :: UState) => (String, MatchRule) -> DBus ()
-        -- Left composition section used for two parameters passing
-        setSignal (rtype, rule) = onSignal rule ((liftIO .) . signalDispatcher rtype)
+      setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
+      -- Left composition section used for two parameters passing      
+      setSignal c (rtype, rule) = listen c rule $ signalDispatcher rtype
 
+
+signalDispatcherTest :: String -> BusName -> Signal -> IO ()
+signalDispatcherTest  rtype _ _ = logOk $ "would handle: " ++ rtype
 -- Runs trigger on signal
 signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
 signalDispatcher rtype _ sig = runTrigger rtype obj
@@ -144,7 +144,7 @@ getDeviceInfo obj = do
                          , ("DeviceIsMounted", toVariant False)
                          , ("DeviceMountPaths", toVariant emptyArray)
                          ]
-                    Just emptyArray = toArray DBusString ([] :: [String])
+                    emptyArray = ([] :: [String])
                 return DInfo { diObjectPath = objectPathToString obj
                              , diDeviceFile = "<unknown>"
                              , diProperties = M.fromList pm
@@ -223,30 +223,30 @@ substituteParameters dev s = doReplaces s $ getVarPositions s
 variantToString :: Variant -> String
 variantToString v = f (variantType v)
     where  -- These are different cases of Variant types
-        f DBusString =
+        f TypeString =
             fromJust $ (fromVariant v :: Maybe String)
-        f DBusObjectPath =
+        f TypeObjectPath =
             objectPathToString $ fromJust $ (fromVariant v :: Maybe ObjectPath)
-        f DBusSignature =
-            B.unpack $ strSignature $ fromJust $ (fromVariant v :: Maybe Signature)
-        f DBusVariant =
+        f TypeSignature =
+            B.unpack $ signatureText $ fromJust $ (fromVariant v :: Maybe Signature)
+        f TypeVariant =
             variantToString $ fromJust $ (fromVariant v :: Maybe Variant)
-        f (DBusArray _) =
+        f (TypeArray _) =
             maybe "" variantToString $ listToMaybe $
             arrayItems $ fromJust $ fromVariant $ v
-        f (DBusDictionary _ _) =
+        f (TypeDictionary _ _) =
             maybe "" variantToString $ fmap snd $ listToMaybe $
             dictionaryItems $ fromJust $ fromVariant v
         f t = case t of
-            DBusBoolean -> show $ fromJust $ (fromVariant v :: Maybe Bool)
-            DBusByte    -> show $ fromJust $ (fromVariant v :: Maybe Word8)
-            DBusInt16   -> show $ fromJust $ (fromVariant v :: Maybe Int16)
-            DBusInt32   -> show $ fromJust $ (fromVariant v :: Maybe Int32)
-            DBusInt64   -> show $ fromJust $ (fromVariant v :: Maybe Int64)
-            DBusWord16	-> show $ fromJust $ (fromVariant v :: Maybe Word16)
-            DBusWord32	-> show $ fromJust $ (fromVariant v :: Maybe Word32)
-            DBusWord64	-> show $ fromJust $ (fromVariant v :: Maybe Word64)
-            DBusDouble	-> show $ fromJust $ (fromVariant v :: Maybe Double)
+            TypeBoolean -> show $ fromJust $ (fromVariant v :: Maybe Bool)
+            TypeWord8    -> show $ fromJust $ (fromVariant v :: Maybe Word8)
+            TypeInt16   -> show $ fromJust $ (fromVariant v :: Maybe Int16)
+            TypeInt32   -> show $ fromJust $ (fromVariant v :: Maybe Int32)
+            TypeInt64   -> show $ fromJust $ (fromVariant v :: Maybe Int64)
+            TypeWord16	-> show $ fromJust $ (fromVariant v :: Maybe Word16)
+            TypeWord32	-> show $ fromJust $ (fromVariant v :: Maybe Word32)
+            TypeWord64	-> show $ fromJust $ (fromVariant v :: Maybe Word64)
+            TypeDouble	-> show $ fromJust $ (fromVariant v :: Maybe Double)
 
     {- replace "$DEVICE$" (diDeviceFile dev) .
     maybe (replace "$MOUNTPATH$" "<not mounted>")                           
