@@ -76,7 +76,7 @@ showNotification body summary icon timeout urgency = do
             NULow -> 0 :: Word8
             NUNormal -> 1
             NUCritical -> 2
-    let hints = toVariant [(("urgency" :: String), nurgency)]
+    let hints = M.fromList [(("urgency" :: String), toVariant nurgency)]
     homepath <- getEnv "HOME"
     let CVString ricon = if icon /= "default"
                          then CVString icon
@@ -84,16 +84,26 @@ showNotification body summary icon timeout urgency = do
                               uConfig ?st
     let ricon' = replace "$HOME$" homepath ricon
     client <- sessionBusClient
+    -- r <- call client $ notificationProxy "Notify" 
+    --                   ([ toVariant ("UDisksEvt" :: String)
+    --                    , toVariant (0 :: Word32)
+    --                    , toVariant ricon'
+    --                    , toVariant summary
+    --                    , toVariant body
+    --                    , toVariant ([] :: [String])
+    --                    , toVariant hints
+    --                    , toVariant (fromIntegral timeout :: Int32)
+    --                    ])
     r <- call client $ notificationProxy "Notify" 
-                      ([ toVariant ("UDisksEvt" :: String)
-                       , toVariant (0 :: Word32)
-                       , toVariant ricon'
-                       , toVariant summary
-                       , toVariant body
-                       , toVariant ([] :: [String])
-                       , toVariant hints
-                       , toVariant (fromIntegral timeout :: Int32)
-                       ])
+         ([ toVariant ("UDisksEvt" :: String)
+          , toVariant (0 :: Word32)
+          , toVariant ricon'
+          , toVariant summary
+          , toVariant body
+          , toVariant ([] :: [String])
+          , toVariant hints
+          , toVariant (fromIntegral timeout :: Int32)
+          ])
     either (logNotifyError summary body) (logNotifyOk summary body ricon') r
     return ()
 
