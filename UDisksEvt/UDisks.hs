@@ -15,6 +15,7 @@ import Data.List
 import Data.Maybe
 import Data.Word
 import DBus.Client
+import DBus.Client.Simple (connectSystem, connectSession)
 import DBus.Message
 import DBus.Types
 import System.IO
@@ -61,10 +62,11 @@ runShell cmd = do
 -- Set up UDisks signals handlers
 runSignalHandlers :: Configuration -> IO ()
 runSignalHandlers conf = do
-    client <- systemBusClient
+    client <- connectSystem
+    sClient <- connectSession
     devs <- newTVarIO M.empty
     -- Set initial state
-    let ?st = U conf devs
+    let ?st = U conf sClient client devs
     -- Set signals based on triggers mapping
     mapM_ (setSignal client) triggers    
     -- logOk "TEST"

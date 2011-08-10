@@ -5,8 +5,9 @@
 
 module UDisksEvt.DBus where
 
+import Control.Exception (bracket)
 import Control.Monad
-import Control.Monad.IO.Class
+import Control.Monad.IO.Class  
 import DBus.Client
 import DBus.Client.Simple (connectSession, connectSystem)
 import DBus.Message
@@ -56,18 +57,11 @@ devicePropertyProxy dev = ifaceProxy "org.freedesktop.UDisks" dev "org.freedeskt
 notificationProxy = ifaceProxy "org.freedesktop.Notifications" "/org/freedesktop/Notifications"
                     "org.freedesktop.Notifications"
 
--- Get system bus Client object
-systemBusClient = connectSystem
-
--- Get session bus Client object
-sessionBusClient = connectSession
-
 -- Wake UDisks daemon with a request
 wakeDaemon :: IO ()
-wakeDaemon = do
-  client <- systemBusClient 
+wakeDaemon = bracket connectSystem disconnect $ \client -> 
   call client (udisksProxy "EnumerateDevices" []) >>=
-    either logDBusError logDaemonStartup 
+  either logDBusError logDaemonStartup 
 
 -- Show notification using D-Bus org.freedesktop.Notifications server, if present
 showNotification :: (?st :: UState) => String -> String -> String -> Int -> NotificationUrgency -> IO ()
@@ -83,17 +77,7 @@ showNotification body summary icon timeout urgency = do
                          else fromJust $ M.lookup "default-notification-icon" $ cVars $
                               uConfig ?st
     let ricon' = replace "$HOME$" homepath ricon
-    client <- sessionBusClient
-    -- r <- call client $ notificationProxy "Notify" 
-    --                   ([ toVariant ("UDisksEvt" :: String)
-    --                    , toVariant (0 :: Word32)
-    --                    , toVariant ricon'
-    --                    , toVariant summary
-    --                    , toVariant body
-    --                    , toVariant ([] :: [String])
-    --                    , toVariant hints
-    --                    , toVariant (fromIntegral timeout :: Int32)
-    --                    ])
+    let client = uSessionClient ?st
     r <- call client $ notificationProxy "Notify" 
          ([ toVariant ("UDisksEvt" :: String)
           , toVariant (0 :: Word32)
@@ -110,7 +94,7 @@ showNotification body summary icon timeout urgency = do
 -- Get device property either from UDisks or from device cache
 getDeviceProperty :: (?st :: UState) => ObjectPath -> String -> IO (Maybe Variant)
 getDeviceProperty obj pname = do
-    client <- systemBusClient
+    let client = uSystemClient ?st
     response <- call client (devicePropertyProxy obj "Get" (map toVariant ["org.freedesktop.UDisks.Device", pname]))
     case response of
         Left _ -> do  -- Error, trying to retrieve value from cache
@@ -129,7 +113,7 @@ getDeviceProperty obj pname = do
 -- the cache was used
 getDevicePropertyMap :: (?st :: UState) => ObjectPath -> IO (Bool, Maybe (M.Map String Variant))
 getDevicePropertyMap obj = do
-    client <- systemBusClient
+    let client = uSystemClient ?st
     response <- call client (devicePropertyProxy obj "GetAll" 
                              [toVariant ("org.freedesktop.UDisks.Device" :: String)])
     case response of
