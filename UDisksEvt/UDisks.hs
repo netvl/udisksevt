@@ -69,15 +69,12 @@ runSignalHandlers conf = do
     let ?st = U conf sClient client devs
     -- Set signals based on triggers mapping
     mapM_ (setSignal client) triggers    
-    -- logOk "TEST"
     where
       setSignal :: (?st :: UState) => Client -> (String, MatchRule) -> IO ()
       -- Left composition section used for two parameters passing      
       setSignal c (rtype, rule) = listen c rule $ signalDispatcher rtype
 
 
-signalDispatcherTest :: String -> BusName -> Signal -> IO ()
-signalDispatcherTest  rtype _ _ = logOk $ "would handle: " ++ rtype
 -- Runs trigger on signal
 signalDispatcher :: (?st :: UState) => String -> BusName -> Signal -> IO ()
 signalDispatcher rtype _ sig = runTrigger rtype obj
