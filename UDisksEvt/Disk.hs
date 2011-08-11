@@ -9,13 +9,13 @@ import DBus.Types
 import Data.Maybe
 
 import qualified Data.Map as M
-import qualified Data.Text.Lazy as B
+import qualified Data.Text as B
 
 import UDisksEvt.Datatypes
 
 -- Cast ObjectPath value to string
 objectPathToString :: ObjectPath -> String
-objectPathToString = B.unpack . strObjectPath
+objectPathToString = B.unpack . objectPathText
 
 -- Get device property from cache
 getDevicePropertyCached :: (?st :: UState) => ObjectPath -> String -> IO (Maybe Variant)
@@ -38,3 +38,4 @@ getDeviceInfoCached obj =
 getDeviceMountPoint :: DeviceInfo -> Maybe String
 getDeviceMountPoint di = M.lookup "DeviceMountPaths" (diProperties di) >>=
                          fromVariant >>= fromArray >>= listToMaybe
+  where fromArray = mapM fromVariant . arrayItems
