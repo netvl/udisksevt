@@ -4,10 +4,11 @@
 module UDisksEvt.Log where
 
 import DBus.Message
-import DBus.Types
+import DBus.Types (ObjectPath)
 import System.IO
 
-import qualified Data.Text.Lazy as B
+import Control.Concurrent.MVar  
+import qualified Data.Text as B
 
 -- Print simple log message; now using only stdout
 logOk :: String -> IO ()
@@ -42,7 +43,7 @@ logRunningCommand cmd = logOk $ "Running command:\n\t" ++ show cmd
 -- Print that there was an error with notification sending
 logNotifyError :: String -> String -> Error -> IO ()
 logNotifyError summary body err = do
-    let errname = B.unpack $ strErrorName $ errorName err
+    let errname = B.unpack $ errorMessage err
     logError $ "Error sending notification: " ++ errname ++
         ":\n\t" ++ show summary ++ " " ++ show body
 

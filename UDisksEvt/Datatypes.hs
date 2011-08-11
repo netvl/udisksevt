@@ -5,6 +5,7 @@
 module UDisksEvt.Datatypes where
 
 import Data.Map (Map)
+import DBus.Client (Client)  
 import DBus.Types
 import Control.Concurrent.STM (TVar)
 import Text.ParserCombinators.Parsec (GenParser)
@@ -62,5 +63,7 @@ data DeviceInfo = DInfo { diObjectPath :: String
 
 -- Global state datatype
 data UState = U { uConfig :: Configuration
+                , uSessionClient :: Client
+                , uSystemClient :: Client
                 , uDevices :: TVar (Map String DeviceInfo)
                 }
